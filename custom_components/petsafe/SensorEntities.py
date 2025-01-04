@@ -49,7 +49,7 @@ class PetSafeSensorEntity(CoordinatorEntity, SensorEntity):
         self._attr_entity_category = entity_category
 
         if device_class == "signal_strength":
-            self._attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS
+            self._attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
         elif device_class == "battery":
             self._attr_native_unit_of_measurement = PERCENTAGE
 
