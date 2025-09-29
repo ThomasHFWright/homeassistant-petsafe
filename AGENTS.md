@@ -104,11 +104,11 @@ rules:
 
 - Shared constants: [homeassistant.const](https://raw.githubusercontent.com/home-assistant/core/refs/heads/dev/homeassistant/const.py) (use these instead of hardcoding; check file for available constants to import)
 - Integration structure:
-  - `custom_components/kippy/const.py` - Constants
-  - `custom_components/kippy/models.py` - Data models
-  - `custom_components/kippy/coordinator.py` - Update coordinator
-  - `custom_components/kippy/config_flow.py` - Configuration flow
-  - `custom_components/kippy/{platform}.py` - Platform implementations
+  - `custom_components/petsafe/const.py` - Constants
+  - `custom_components/petsafe/models.py` - Data models
+  - `custom_components/petsafe/coordinator.py` - Update coordinator
+  - `custom_components/petsafe/config_flow.py` - Configuration flow
+  - `custom_components/petsafe/{platform}.py` - Platform implementations
 
 ### Common Modules
 
@@ -160,17 +160,6 @@ rules:
   ```
 - **Error Handling**: Define errors in `strings.json` under `config.error`
 - **Step Methods**: Use standard naming (`async_step_user`, `async_step_discovery`, etc.)
-
-### Integration Ownership
-
-- **manifest.json**: Add GitHub usernames to `codeowners`:
-  ```json
-  {
-    "domain": "kippy",
-    "name": "Kippy",
-    "codeowners": ["@me"]
-  }
-  ```
 
 ### Documentation Standards
 
@@ -916,18 +905,18 @@ rules:
 
 ### Code Quality & Linting
 
-- **Required before submission**: Run `pylint custom_components/kippy` to lint the entire integration
+- **Required before submission**: Run `pylint custom_components/petsafe` to lint the entire integration
 - **Run all linters on all files**: `pre-commit run --all-files`
 - **Run linters on staged files only**: `pre-commit run`
 - **MyPy type checking (whole project)**: `mypy custom_components/`
-- **MyPy on specific integration**: `mypy custom_components/kippy`
+- **MyPy on specific integration**: `mypy custom_components/petsafe`
 
 ### Testing
 
 - **Integration-specific tests** (recommended):
   ```bash
   pytest ./tests \
-    --cov=custom_components.kippy \
+    --cov=custom_components.petsafe \
     --cov-report term-missing \
     --durations-min=1 \
     --durations=0 \
@@ -967,7 +956,7 @@ rules:
 
 ### File Locations
 
-- **Integration code**: `./custom_components/kippy/`
+- **Integration code**: `./custom_components/petsafe/`
 - **Integration tests**: `./tests/`
 
 ## Integration Templates
@@ -975,7 +964,7 @@ rules:
 ### Standard Integration Structure
 
 ```
-custom_components/kippy/
+custom_components/petsafe/
 ├── __init__.py          # Entry point with async_setup_entry
 ├── manifest.json        # Integration metadata and dependencies
 ├── const.py            # Domain and constants
@@ -1195,7 +1184,7 @@ async def test_entities(
 def mock_config_entry() -> MockConfigEntry:
     """Return the default mocked config entry."""
     return MockConfigEntry(
-        title="Kippy",
+        title="Petsafe",
         domain=DOMAIN,
         data={CONF_HOST: "127.0.0.1", CONF_API_KEY: "test_key"},
         unique_id="device_unique_id",
@@ -1204,7 +1193,7 @@ def mock_config_entry() -> MockConfigEntry:
 @pytest.fixture
 def mock_device_api() -> Generator[MagicMock]:
     """Return a mocked device API."""
-    with patch("custom_components.kippy.MyDeviceAPI", autospec=True) as api_mock:
+    with patch("custom_components.petsafe.MyDeviceAPI", autospec=True) as api_mock:
         api = api_mock.return_value
         api.get_data.return_value = MyDeviceData.from_json(
             load_fixture("device_data.json", DOMAIN)
@@ -1226,7 +1215,7 @@ async def init_integration(
     """Set up the integration for testing."""
     mock_config_entry.add_to_hass(hass)
 
-    with patch("custom_components.kippy.PLATFORMS", platforms):
+    with patch("custom_components.petsafe.PLATFORMS", platforms):
         await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
@@ -1247,7 +1236,7 @@ async def init_integration(
 
 ```python
 # Enable debug logging in tests
-caplog.set_level(logging.DEBUG, logger="kippy")
+caplog.set_level(logging.DEBUG, logger="petsafe")
 
 # In integration code - use proper logging
 _LOGGER = logging.getLogger(__name__)
@@ -1269,20 +1258,20 @@ ruff format
 ruff check
 
 # Lint with Flake8 (required for every change; lint the integration and every test module)
-python -m flake8 custom_components/kippy tests
+python -m flake8 custom_components/petsafe tests
 
 # Lint with pylint (required for every change; lint the integration and every test module)
-python -m pylint custom_components/kippy tests
+python -m pylint custom_components/petsafe tests
 
 # Check specific integration (uses HA version from requirements.txt)
-python script/hassfest --integration-path custom_components/kippy
+python script/hassfest --integration-path custom_components/petsafe
 
 # Validate quality scale
 # Check quality_scale.yaml against current rules
 
 # Run integration tests with coverage
 pytest ./tests \
-  --cov=custom_components.kippy \
+  --cov=custom_components.petsafe \
   --cov-report term-missing
 ```
 
@@ -1292,7 +1281,7 @@ validation rules in sync with the runtime environment.
 
 ### Known hassfest Ruff error
 
-If `python script/hassfest --integration-path custom_components/kippy` fails with
+If `python script/hassfest --integration-path custom_components/petsafe` fails with
 `Rule S320 removed and cannot be selected`, reinstall the pinned Ruff version to
 align with the Home Assistant Core release:
 

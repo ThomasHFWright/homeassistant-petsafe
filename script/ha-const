@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Utility to inspect Home Assistant constants.
+
+Reads the ``homeassistant.const`` module from the version pinned in
+``requirements.txt`` and prints requested constant values. If no names are
+provided, it lists all available constant names.
+"""
+from __future__ import annotations
+
+import sys
+
+from homeassistant import const
+
+
+def main() -> None:
+    if len(sys.argv) == 1:
+        for name in sorted(n for n in dir(const) if n.isupper()):
+            print(name)
+        return
+    for arg in sys.argv[1:]:
+        value = getattr(const, arg, None)
+        print(f"{arg} = {value}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 {
-  "name": "Kippy Home Assistant HACS Dev",
+  "name": "Petsafe Home Assistant Dev",
   "image": "mcr.microsoft.com/devcontainers/python:3.13",
   "postCreateCommand": "./script/setup",
   "postStartCommand": "./script/bootstrap",

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Install dependencies and start Home Assistant for petsafe-homeassistant-hacs
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VENV_DIR="/home/vscode/.local/ha-venv"
+PY="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
+
+INSTALL_ONLY=0
+if [ "${1:-}" = "--no-run" ]; then
+  INSTALL_ONLY=1
+fi
+
+cd "$REPO_ROOT"
+
+# Ensure venv exists
+if [ ! -x "$PY" ]; then
+  echo "Creating virtualenv at $VENV_DIR ..."
+  python3 -m venv "$VENV_DIR"
+  "$PY" -m pip install --upgrade pip wheel
+fi
+
+echo "Installing project dependencies into $VENV_DIR ..."
+"$PIP" install --upgrade -r requirements.txt
+
+echo "Bootstrap complete. Interpreter and HA status:"
+"$PY" - <<'PYCODE'
+import sys
+print("  Python:", sys.version.split()[0], "at", sys.executable)
+try:
+    import homeassistant as ha
+    print("  Home Assistant:", getattr(ha, "__version__", "installed (version unknown)"))
+except Exception as e:
+    print("  Home Assistant not importable:", e)
+PYCODE
+
+# Stop after install if requested by setup
+if [ "$INSTALL_ONLY" -eq 1 ]; then
+  exit 0
+fi
+
+# Pick config dir: /config if present, else dev-config in repo
+if [ -d "/config" ]; then
+  CONFIG_DIR="/config"
+else
+  CONFIG_DIR="$REPO_ROOT/dev-config"
+  mkdir -p "$CONFIG_DIR"
+  if [ ! -f "$CONFIG_DIR/configuration.yaml" ]; then
+    cat > "$CONFIG_DIR/configuration.yaml" <<'YAML'
+default_config:
+logger:
+  default: info
+  logs:
+    custom_components.petsafe: debug
+YAML
+  fi
+  mkdir -p "$CONFIG_DIR/custom_components"
+  if [ ! -e "$CONFIG_DIR/custom_components/petsafe" ]; then
+    ln -s "$REPO_ROOT/custom_components/petsafe" "$CONFIG_DIR/custom_components/petsafe"
+  fi
+fi
+
+#Disabling HA start so it can be manually started later
+#echo "Starting Home Assistant with config: $CONFIG_DIR"
+#exec "$PY" -m homeassistant -c "$CONFIG_DIR"

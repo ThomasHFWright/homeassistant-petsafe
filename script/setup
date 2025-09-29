@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Set up the development environment for petsafe-homeassistant
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VENV_DIR="/home/vscode/.local/ha-venv"
+PY="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
+
+cd "$REPO_ROOT"
+
+# Mark the repository as safe for Git inside the container
+git config --global --add safe.directory "$REPO_ROOT"
+
+# Create the venv VS Code/devcontainer is configured to use
+if [ ! -x "$PY" ]; then
+  echo "Creating virtualenv at $VENV_DIR ..."
+  python3 -m venv "$VENV_DIR"
+  "$PY" -m pip install --upgrade pip wheel
+fi
+
+# Ensure uv and pre-commit are available in this venv
+"$PIP" install --upgrade uv pre-commit
+
+# Install project dependencies (install-only; do NOT start HA here)
+"$REPO_ROOT/script/bootstrap" --no-run
+
+# Install pre-commit hooks
+"$VENV_DIR/bin/pre-commit" install
+
+echo "Setup complete."
