@@ -57,7 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_TOKEN),
         entry.data.get(CONF_REFRESH_TOKEN),
         entry.data.get(CONF_ACCESS_TOKEN),
-        client=get_async_client(hass),
+        client = get_async_client(hass)
     )
 
     hass.data.setdefault(DOMAIN, {})
