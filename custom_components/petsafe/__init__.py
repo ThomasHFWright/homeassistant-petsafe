@@ -1,4 +1,5 @@
 """The PetSafe Integration integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -45,6 +46,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.BUTTON,
     Platform.SELECT,
+    Platform.LOCK,
 ]
 
 
@@ -55,7 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_TOKEN),
         entry.data.get(CONF_REFRESH_TOKEN),
         entry.data.get(CONF_ACCESS_TOKEN),
-        client = get_async_client(hass)
+        client=get_async_client(hass),
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -211,9 +213,11 @@ class PetSafeData:
         self,
         feeders: list[petsafe.devices.DeviceSmartFeed],
         litterboxes: list[petsafe.devices.DeviceScoopfree],
+        smartdoors: list[petsafe.devices.DeviceSmartDoor],
     ):
         self.feeders = feeders
         self.litterboxes = litterboxes
+        self.smartdoors = smartdoors
 
 
 class PetSafeCoordinator(DataUpdateCoordinator):
@@ -235,6 +239,7 @@ class PetSafeCoordinator(DataUpdateCoordinator):
         self.hass: HomeAssistant = hass
         self._feeders: list[petsafe.devices.DeviceSmartFeed] = None
         self._litterboxes: list[petsafe.devices.DeviceScoopfree] = None
+        self._smartdoors: list[petsafe.devices.DeviceSmartDoor] = None
         self._device_lock = asyncio.Lock()
         self.entry = entry
         self._authErrorCount = 0
@@ -265,21 +270,39 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                     raise
             return self._litterboxes
 
+    async def get_smartdoors(self) -> list[petsafe.devices.DeviceSmartDoor]:
+        """Return the list of smart doors."""
+        async with self._device_lock:
+            try:
+                if self._smartdoors is None:
+                    self._smartdoors = await self.api.get_smartdoors()
+            except httpx.HTTPStatusError as ex:
+                if ex.response.status_code in (401, 403):
+                    await self.entry.async_start_reauth(self.hass)
+                else:
+                    raise
+            return self._smartdoors
+
     async def _async_update_data(self) -> PetSafeData:
         """Fetch data from API endpoint."""
         try:
             async with self._device_lock:
                 self._feeders = await self.api.get_feeders()
                 self._litterboxes = await self.api.get_litterboxes()
+                self._smartdoors = await self.api.get_smartdoors()
                 self._authErrorCount = 0
-                return PetSafeData(self._feeders, self._litterboxes)
+                return PetSafeData(
+                    self._feeders,
+                    self._litterboxes,
+                    self._smartdoors,
+                )
         except httpx.HTTPStatusError as ex:
             if ex.response.status_code in (401, 403):
                 self._authErrorCount += 1
                 if self._authErrorCount >= 5:
                     self._authErrorCount = 0
                     raise ConfigEntryAuthFailed() from ex
-                
+
             else:
                 raise UpdateFailed() from ex
         except Exception as ex:
