@@ -5,14 +5,15 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import PetSafeCoordinator
-from .SmartDoorEntities import PetSafeSmartDoorLockEntity
 from .const import DOMAIN
+from .SmartDoorEntities import PetSafeSmartDoorLockEntity
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, config: ConfigEntry, add_entities
+    hass: HomeAssistant, config: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up PetSafe SmartDoor lock entities."""
 
@@ -31,4 +32,4 @@ async def async_setup_entry(
     ]
 
     if entities:
-        add_entities(entities)
+        async_add_entities(entities)
