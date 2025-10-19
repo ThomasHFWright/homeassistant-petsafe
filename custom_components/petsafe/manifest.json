@@ -1,19 +1,19 @@
 {
-  "version": "1.4.0",
   "domain": "petsafe",
   "name": "PetSafe",
-  "config_flow": true,
-  "documentation": "https://github.com/dcmeglio/homeassistant-petsafe/blob/master/README",
-  "requirements": [
-    "petsafe==2.0.6"
-  ],
-  "issue_tracker": "https://github.com/dcmeglio/homeassistant-petsafe/issues",
-  "ssdp": [],
-  "zeroconf": [],
-  "homekit": {},
-  "dependencies": [],
   "codeowners": [
     "@dcmeglio"
   ],
-  "iot_class": "cloud_polling"
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/dcmeglio/homeassistant-petsafe/blob/master/README",
+  "homekit": {},
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/dcmeglio/homeassistant-petsafe/issues",
+  "requirements": [
+    "petsafe@git+https://github.com/ThomasHFWright/petsafe.git@codex/add-new-api-calls-for-smartdoor-and-pets#subdirectory=custom_components/petsafe"
+  ],
+  "ssdp": [],
+  "version": "1.4.0",
+  "zeroconf": []
 }
