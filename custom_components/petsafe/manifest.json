@@ -5,7 +5,7 @@
   "config_flow": true,
   "documentation": "https://github.com/dcmeglio/homeassistant-petsafe/blob/master/README",
   "requirements": [
-    "petsafe==2.0.6"
+    "petsafe@git+https://github.com/ThomasHFWright/petsafe.git@codex/add-new-api-calls-for-smartdoor-and-pets#subdirectory=custom_components/petsafe"
   ],
   "issue_tracker": "https://github.com/dcmeglio/homeassistant-petsafe/issues",
   "ssdp": [],
