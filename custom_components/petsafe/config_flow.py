@@ -1,9 +1,12 @@
 """Config flow for PetSafe Integration."""
+
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 import homeassistant.helpers.config_validation as cv
+import petsafe
 import voluptuous as vol
 from botocore.exceptions import ParamValidationError
 from homeassistant import config_entries
@@ -16,8 +19,6 @@ from homeassistant.const import (
 )
 from homeassistant.data_entry_flow import FlowResult
 
-import petsafe
-
 from .const import CONF_REFRESH_TOKEN, DOMAIN
 
 STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_EMAIL): str})
@@ -28,7 +29,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for PetSafe Integration."""
 
     def __init__(self):
-
         self.data: dict = {}
         self._client = None
         self._id_token = None
@@ -114,7 +114,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=self.data[CONF_EMAIL], data=self.data)
 
     async def get_email_code(self, email: str):
-        self._client = petsafe.PetSafeClient(email=email)
+        self._client = await self.hass.async_add_executor_job(
+            partial(petsafe.PetSafeClient, email=email)
+        )
         await self._client.request_code()
         return True
 
