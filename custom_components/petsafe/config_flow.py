@@ -37,6 +37,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._feeders = None
         self._litterboxes = None
+        self._smartdoors = None
 
     VERSION = 1
 
@@ -103,6 +104,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         vol.Required(
                             "litterboxes", default=list(self._litterboxes)
                         ): cv.multi_select(self._litterboxes),
+                        vol.Required(
+                            "smartdoors", default=list(self._smartdoors)
+                        ): cv.multi_select(self._smartdoors),
                     }
                 ),
             )
@@ -129,5 +133,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
         self._litterboxes = {
             x.api_name: x.friendly_name for x in await self._client.get_litterboxes()
+        }
+        self._smartdoors = {
+            x.api_name: x.friendly_name for x in await self._client.get_smartdoors()
         }
         return True
