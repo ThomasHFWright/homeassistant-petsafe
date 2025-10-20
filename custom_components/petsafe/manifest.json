@@ -9,7 +9,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/dcmeglio/homeassistant-petsafe/issues",
   "requirements": [
-    "petsafe@git+https://github.com/ThomasHFWright/petsafe.git@codex/add-new-api-calls-for-smartdoor-and-pets#subdirectory=custom_components/petsafe"
+    "petsafe@git+https://github.com/ThomasHFWright/petsafe@codex/add-new-api-calls-for-smartdoor-and-pets"
   ],
   "ssdp": [],
   "version": "1.4.0",
