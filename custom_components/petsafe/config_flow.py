@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from functools import partial
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -118,7 +119,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=self.data[CONF_EMAIL], data=self.data)
 
     async def get_email_code(self, email: str):
-        self._client = petsafe.PetSafeClient(email=email)
+        self._client = await self.hass.async_add_executor_job(
+            partial(petsafe.PetSafeClient, email=email)
+        )
         await self._client.request_code()
         return True
 
