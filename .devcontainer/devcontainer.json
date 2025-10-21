@@ -35,8 +35,6 @@
       "settings": {
         "python.experiments.optOutFrom": ["pythonTestAdapter"],
         "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
-        "pylint.importStrategy": "fromEnvironment",
-        "pylint.path": ["/home/vscode/.local/ha-venv/bin/pylint"],
         "python.terminal.activateEnvInCurrentTerminal": true,
         "python.testing.pytestArgs": ["--no-cov", "tests"],
         "python.testing.pytestEnabled": true,
