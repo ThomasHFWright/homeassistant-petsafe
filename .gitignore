@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 .vscode/*
 !.vscode/launch.json
+!.vscode/settings.json
 .idea/
 dev-config/
 .secrets/
