@@ -11,6 +11,13 @@
         "data": {
           "code": "Confirmation Code"
         }
+      },
+      "devices": {
+        "data": {
+          "feeders": "Feeders",
+          "litterboxes": "Litterboxes",
+          "smartdoors": "SmartDoors"
+        }
       }
     },
     "error": {
