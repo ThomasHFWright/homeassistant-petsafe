@@ -138,6 +138,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             x.api_name: x.friendly_name for x in await self._client.get_litterboxes()
         }
         self._smartdoors = {
-            x.api_name: x.friendly_name for x in await self._client.get_smartdoors()
+            x.api_name: (
+                x.data.get("friendlyName")
+                if hasattr(x, "data") and isinstance(getattr(x, "data"), dict)
+                else None
+            )
+            or x.friendly_name
+            or x.api_name
+            for x in await self._client.get_smartdoors()
         }
         return True
