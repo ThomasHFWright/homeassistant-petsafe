@@ -43,6 +43,7 @@ def _create_smartdoor(
     door.data = {
         "productName": "SmartDoor",
         "friendlyName": "Back Door",
+        "timezone": "America/Chicago",
     }
     door.firmware = "1.0.0"
     door.mode = mode
@@ -91,6 +92,8 @@ async def test_lock_entity_state_and_controls(hass, coordinator) -> None:
         "battery_voltage": 12.3,
         "rssi": -40,
         "battery_level": 75,
+        "friendlyName": "Back Door",
+        "timezone": "America/Chicago",
     }
     for key, value in expected_attrs.items():
         assert entity.extra_state_attributes[key] == value

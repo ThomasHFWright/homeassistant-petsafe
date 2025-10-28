@@ -60,7 +60,11 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         if door is None:
             return {}
 
-        return {
+        data = door.data if isinstance(door.data, Mapping) else {}
+        friendly_name = data.get("friendlyName")
+        timezone = data.get("timezone")
+
+        attributes = {
             "mode": door.mode,
             "latch_state": door.latch_state,
             "error_state": door.error_state,
@@ -70,6 +74,13 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
             "rssi": door.rssi,
             ATTR_BATTERY_LEVEL: door.battery_level,
         }
+
+        if friendly_name is not None:
+            attributes["friendlyName"] = friendly_name
+        if timezone is not None:
+            attributes["timezone"] = timezone
+
+        return attributes
 
     @property
     def available(self) -> bool:
