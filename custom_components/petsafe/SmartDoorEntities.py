@@ -47,6 +47,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         friendly_name = (
             getattr(device, "friendly_name", None)
             or device.data.get("friendlyName")
+            or device.data.get("friendly_name")
             or device.api_name
         )
 
@@ -65,7 +66,11 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
             return {}
 
         data = door.data if isinstance(door.data, Mapping) else {}
-        friendly_name = getattr(door, "friendly_name", None) or data.get("friendlyName")
+        friendly_name = (
+            getattr(door, "friendly_name", None)
+            or data.get("friendlyName")
+            or data.get("friendly_name")
+        )
         timezone = getattr(door, "timezone", None) or data.get("timezone")
 
         attributes = {
@@ -80,7 +85,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         }
 
         if friendly_name is not None:
-            attributes["friendlyName"] = friendly_name
+            attributes["friendly_name"] = friendly_name
         if timezone is not None:
             attributes["timezone"] = timezone
 

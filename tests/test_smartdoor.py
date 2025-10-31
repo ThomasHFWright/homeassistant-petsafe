@@ -92,7 +92,7 @@ async def test_lock_entity_state_and_controls(hass, coordinator) -> None:
         "battery_voltage": 12.3,
         "rssi": -40,
         "battery_level": 75,
-        "friendlyName": "Back Door",
+        "friendly_name": "Back Door",
         "timezone": "America/Chicago",
     }
     for key, value in expected_attrs.items():
