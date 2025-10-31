@@ -44,7 +44,11 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
 
         model = device.data.get("productName")
         sw_version = device.firmware
-        friendly_name = device.data.get("friendlyName") or device.api_name
+        friendly_name = (
+            getattr(device, "friendly_name", None)
+            or device.data.get("friendlyName")
+            or device.api_name
+        )
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device.api_name)},
@@ -61,8 +65,8 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
             return {}
 
         data = door.data if isinstance(door.data, Mapping) else {}
-        friendly_name = data.get("friendlyName")
-        timezone = data.get("timezone")
+        friendly_name = getattr(door, "friendly_name", None) or data.get("friendlyName")
+        timezone = getattr(door, "timezone", None) or data.get("timezone")
 
         attributes = {
             "mode": door.mode,
