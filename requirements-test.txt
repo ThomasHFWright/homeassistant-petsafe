@@ -1,0 +1,15 @@
+pytest==8.4.1
+pytest-asyncio==1.1.0
+pytest-cov==6.2.1
+pytest-homeassistant-custom-component==0.13.278
+aiohttp==3.12.15
+pycares==4.9.0
+go2rtc-client==0.2.1
+PyTurboJPEG==1.8.0
+flake8==7.3.0
+isort==5.13.2
+pre-commit==4.3.0
+python-dotenv==1.1.1
+pylint==3.3.8
+tqdm==4.67.1
+ruff==0.12.12

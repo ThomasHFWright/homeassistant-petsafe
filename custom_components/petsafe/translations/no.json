@@ -20,7 +20,14 @@
                 "data": {
                   "code": "Bekreftelseskode"
                 }
-              }
+              },
+            "devices": {
+                "data": {
+                    "feeders": "Fôringsautomater",
+                    "litterboxes": "Kattedoer",
+                    "smartdoors": "Smartdører"
+                }
+            }
         }
     }
 }
