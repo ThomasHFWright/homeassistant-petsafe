@@ -2,8 +2,6 @@ add_schedule:
   name: Add feeding schedule
   description: Add a feeding schedule
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
   fields:
@@ -26,8 +24,6 @@ delete_schedule:
   name: Delete schedule
   description: Delete a feeding schedule
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
   fields:
@@ -42,8 +38,6 @@ delete_all_schedules:
   name: Delete all schedules
   description: Delete all feeding schedules
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
 
@@ -51,8 +45,6 @@ modify_schedule:
   name: Modify schedule
   description: Modify an existing feeding schedule
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
   fields:
@@ -75,8 +67,6 @@ feed:
   name: Feed a meal
   description: Trigger the feeder to begin feeding a meal
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
   fields:
@@ -99,7 +89,5 @@ prime:
   name: Prime the feeder
   description: Feeds 5/8 cups to prime the feeder
   target:
-    device:
-      integration: petsafe
     entity:
       integration: petsafe
