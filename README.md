@@ -3,7 +3,6 @@
 [![GitHub Repo stars][stars-shield]][stars]
 [![GitHub Release][releases-shield]][releases]
 [![License][license-shield]](LICENSE)
-[![Community Forum][community-shield]][community]
 [![hacs][hacsbadge]][hacs]
 [![GitHub Activity][commits-shield]][commits]
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -45,8 +44,6 @@ Thank you to @dcmeglio for building the original [dcmeglio/homeassistant-petsafe
 [license-shield]: https://img.shields.io/github/license/ThomasHFWright/homeassistant-petsafe.svg
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40ThomasHFWright-blue.svg
 [releases-shield]: https://img.shields.io/github/v/release/ThomasHFWright/homeassistant-petsafesvg
-[community-shield]: https://img.shields.io/badge/community-forum-blue.svg
-[community]: https://community.home-assistant.io/t/kippy-pet-gps-tracker-custom-integration/933073
 [releases]: https://github.com/ThomasHFWright/homeassistant-petsafe/releases
 [user_profile]: https://github.com/ThomasHFWright
 [integration_blueprint]: https://github.com/custom-components/integration_blueprint
