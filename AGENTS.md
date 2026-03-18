@@ -5,7 +5,7 @@ This repository provides the PetSafe integration for the Home Assistant home aut
 ## General Instructions
 
 - Always read this entire AGENTS.md file before making changes; do not skip any sections.
-- If Python 3.13 is not installed, install it before running any other commands.
+- If Python 3.14.2 is not installed, install it before running any other commands.
 
 ## Integration Quality Scale
 
@@ -62,7 +62,7 @@ rules:
 
 ## Python Requirements
 
-- **Compatibility**: Python 3.13+
+- **Compatibility**: Python 3.14.2
 - **Language Features**: Use the newest features when possible:
   - Pattern matching
   - Type hints

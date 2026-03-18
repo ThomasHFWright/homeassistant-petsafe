@@ -6,11 +6,32 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_DIR="/home/vscode/.local/ha-venv"
 PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
+REQUIRED_PYTHON_MINOR="3.14"
 
 cd "$REPO_ROOT"
 
 # Mark the repository as safe for Git inside the container
 git config --global --add safe.directory "$REPO_ROOT"
+
+# Check container Python version before creating the venv
+CURRENT_PYTHON="$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
+CURRENT_PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+
+if [ "$CURRENT_PYTHON_MINOR" != "$REQUIRED_PYTHON_MINOR" ]; then
+  echo "Container python3 is $CURRENT_PYTHON, but this repo requires Python $REQUIRED_PYTHON_MINOR.x." >&2
+  echo "Pin the container image/Dockerfile to Python $REQUIRED_PYTHON_MINOR, then rebuild the devcontainer." >&2
+  exit 1
+fi
+
+# Recreate the venv if it exists but is not using the required minor version
+if [ -x "$PY" ]; then
+  CURRENT_VENV_MINOR="$("$PY" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+  if [ "$CURRENT_VENV_MINOR" != "$REQUIRED_PYTHON_MINOR" ]; then
+    CURRENT_VENV_VERSION="$("$PY" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
+    echo "Existing virtualenv uses Python $CURRENT_VENV_VERSION; recreating with Python $REQUIRED_PYTHON_MINOR.x ..."
+    rm -rf "$VENV_DIR"
+  fi
+fi
 
 # Create the venv VS Code/devcontainer is configured to use
 if [ ! -x "$PY" ]; then
