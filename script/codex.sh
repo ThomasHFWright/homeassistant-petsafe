@@ -6,7 +6,7 @@ apt-get update
 apt-get install -y ca-certificates libturbojpeg
 update-ca-certificates
 
-PY_VERSION="3.13.3"
+PY_VERSION="3.14.2"
 if ! pyenv versions --bare | grep -qx "$PY_VERSION"; then
   echo "Installing Python $PY_VERSION via pyenv..."
   pyenv install "$PY_VERSION"
