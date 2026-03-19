@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import timedelta
+import logging
 
 import httpx
+import petsafe
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_AREA_ID,
@@ -21,8 +23,6 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
-import petsafe
 
 from .const import (
     ATTR_AMOUNT,
@@ -57,7 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_TOKEN),
         entry.data.get(CONF_REFRESH_TOKEN),
         entry.data.get(CONF_ACCESS_TOKEN),
-        client = get_async_client(hass)
+        client=get_async_client(hass),
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -72,13 +72,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_ids = call.data.get(ATTR_ENTITY_ID)
         time = call.data.get(ATTR_TIME)
         amount = call.data.get(ATTR_AMOUNT)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 await device.schedule_feed(time, amount, False)
 
@@ -89,14 +85,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
         time = call.data.get(ATTR_TIME)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 schedules = await device.get_schedules()
                 for schedule in schedules:
@@ -104,28 +96,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         await device.delete_schedule(str(schedule["id"]), False)
                         break
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_DELETE_SCHEDULE, handle_delete_schedule
-    )
+    hass.services.async_register(DOMAIN, SERVICE_DELETE_SCHEDULE, handle_delete_schedule)
 
     async def handle_delete_all_schedules(call: ServiceCall) -> None:
         device_ids = call.data.get(ATTR_DEVICE_ID)
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 await device.delete_all_schedules(False)
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_DELETE_ALL_SCHEDULES, handle_delete_all_schedules
-    )
+    hass.services.async_register(DOMAIN, SERVICE_DELETE_ALL_SCHEDULES, handle_delete_all_schedules)
 
     async def handle_modify_schedule(call: ServiceCall) -> None:
         device_ids = call.data.get(ATTR_DEVICE_ID)
@@ -133,26 +117,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_ids = call.data.get(ATTR_ENTITY_ID)
         time = call.data.get(ATTR_TIME)
         amount = call.data.get(ATTR_AMOUNT)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 schedules = await device.get_schedules()
                 for schedule in schedules:
                     if schedule["time"] + ":00" == time:
-                        await device.modify_schedule(
-                            schedule["time"], amount, str(schedule["id"]), False
-                        )
+                        await device.modify_schedule(schedule["time"], amount, str(schedule["id"]), False)
                         break
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_MODIFY_SCHEDULE, handle_modify_schedule
-    )
+    hass.services.async_register(DOMAIN, SERVICE_MODIFY_SCHEDULE, handle_modify_schedule)
 
     async def handle_feed(call: ServiceCall) -> None:
         device_ids = call.data.get(ATTR_DEVICE_ID)
@@ -160,14 +136,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_ids = call.data.get(ATTR_ENTITY_ID)
         amount = call.data.get(ATTR_AMOUNT)
         slow_feed = call.data.get(ATTR_SLOW_FEED)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 await device.feed(amount, slow_feed, False)
                 await coordinator.async_request_refresh()
@@ -178,14 +150,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_ids = call.data.get(ATTR_DEVICE_ID)
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
-        matched_devices = get_feeders_for_service(
-            hass, area_ids, device_ids, entity_ids
-        )
+        matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
-            device = next(
-                d for d in await coordinator.get_feeders() if d.api_name == device_id
-            )
+            device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
             if device is not None:
                 # NB: DeviceSmartFeed.prime() synchronously updates state after priming.
                 # Directly send a 5/8 cup meal here so that we can defer the update.
@@ -223,9 +191,7 @@ class PetSafeData:
 class PetSafeCoordinator(DataUpdateCoordinator):
     """Data Update Coordinator for petsafe devices."""
 
-    def __init__(
-        self, hass: HomeAssistant, api: petsafe.PetSafeClient, entry: ConfigEntry
-    ):
+    def __init__(self, hass: HomeAssistant, api: petsafe.PetSafeClient, entry: ConfigEntry):
         """Initialize my coordinator."""
         super().__init__(
             hass,
