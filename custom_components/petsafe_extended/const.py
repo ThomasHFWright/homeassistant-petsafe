@@ -1,6 +1,6 @@
 """Constants for the PetSafe Integration integration."""
 
-DOMAIN = "petsafe"
+DOMAIN = "petsafe_extended"
 CONF_REFRESH_TOKEN = "refresh_token"
 MANUFACTURER = "PetSafe"
 FEEDER_MODEL_GEN1 = "SmartFeed_1.0"
