@@ -1,0 +1,33 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Device is already configured"
+        },
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_user": "Invalid email address",
+            "invalid_code": "Invalid confirmation code",
+            "unknown_error": "Unexpected error"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "email": "Email Address"
+                }
+            },
+            "code": {
+                "description": "Check your email for the confirmation code",
+                "data": {
+                  "code": "Confirmation Code"
+                }
+              },
+            "devices": {
+                "data": {
+                    "feeders": "Feeders",
+                    "litterboxes": "Litterboxes",
+                    "smartdoors": "SmartDoors"
+                }
+            }
+        }
+    }
+}

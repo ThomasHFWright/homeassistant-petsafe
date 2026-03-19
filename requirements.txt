@@ -1,4 +1,0 @@
--c constraints.txt
--r requirements-test.txt
-homeassistant==2025.9.1
-josepy==2.1.0
