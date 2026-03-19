@@ -7,6 +7,48 @@ VENV_DIR="/home/vscode/.local/ha-venv"
 PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 REQUIRED_PYTHON_MINOR="3.14"
+REQUIRED_PYTHON_VERSION="3.14.2"
+
+update_pyenv() {
+  if command -v pyenv >/dev/null 2>&1; then
+    PYENV_ROOT="$(pyenv root)"
+    if [ -d "$PYENV_ROOT/.git" ]; then
+      echo "Updating pyenv so Python $REQUIRED_PYTHON_VERSION is available..." >&2
+      git -C "$PYENV_ROOT" fetch --tags origin >&2
+      git -C "$PYENV_ROOT" pull --ff-only origin master >&2
+    fi
+  fi
+}
+
+resolve_python() {
+  if command -v pyenv >/dev/null 2>&1; then
+    if pyenv prefix "$REQUIRED_PYTHON_VERSION" >/dev/null 2>&1; then
+      PYENV_PYTHON="$(pyenv prefix "$REQUIRED_PYTHON_VERSION")/bin/python${REQUIRED_PYTHON_MINOR}"
+      if [ -x "$PYENV_PYTHON" ]; then
+        printf "%s\n" "$PYENV_PYTHON"
+        return
+      fi
+    fi
+
+    update_pyenv
+    echo "Installing Python $REQUIRED_PYTHON_VERSION with pyenv for the dev environment..." >&2
+    pyenv install -s "$REQUIRED_PYTHON_VERSION" >&2
+    PYENV_PYTHON="$(pyenv prefix "$REQUIRED_PYTHON_VERSION")/bin/python${REQUIRED_PYTHON_MINOR}"
+    if [ -x "$PYENV_PYTHON" ]; then
+      printf "%s\n" "$PYENV_PYTHON"
+      return
+    fi
+  fi
+
+  if command -v python${REQUIRED_PYTHON_MINOR} >/dev/null 2>&1; then
+    command -v python${REQUIRED_PYTHON_MINOR}
+    return
+  fi
+
+  command -v python3
+}
+
+SYSTEM_PYTHON="$(resolve_python)"
 
 cd "$REPO_ROOT"
 
@@ -14,11 +56,11 @@ cd "$REPO_ROOT"
 git config --global --add safe.directory "$REPO_ROOT"
 
 # Check container Python version before creating the venv
-CURRENT_PYTHON="$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
-CURRENT_PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+CURRENT_PYTHON="$($SYSTEM_PYTHON -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
+CURRENT_PYTHON_MINOR="$($SYSTEM_PYTHON -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
 
 if [ "$CURRENT_PYTHON_MINOR" != "$REQUIRED_PYTHON_MINOR" ]; then
-  echo "Container python3 is $CURRENT_PYTHON, but this repo requires Python $REQUIRED_PYTHON_MINOR.x." >&2
+  echo "Resolved Python interpreter is $CURRENT_PYTHON via $SYSTEM_PYTHON, but this repo requires Python $REQUIRED_PYTHON_MINOR.x." >&2
   echo "Pin the container image/Dockerfile to Python $REQUIRED_PYTHON_MINOR, then rebuild the devcontainer." >&2
   exit 1
 fi
@@ -36,7 +78,7 @@ fi
 # Create the venv VS Code/devcontainer is configured to use
 if [ ! -x "$PY" ]; then
   echo "Creating virtualenv at $VENV_DIR ..."
-  python3 -m venv "$VENV_DIR"
+  "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
   "$PY" -m pip install --upgrade pip wheel
 fi
 

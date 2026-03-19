@@ -6,9 +6,16 @@ apt-get update
 apt-get install -y ca-certificates libturbojpeg
 update-ca-certificates
 
-PY_VERSION="3.14"
+PY_VERSION="3.14.2"
+PYENV_ROOT="$(pyenv root)"
 
-echo "Ensuring latest available Python $PY_VERSION.x via pyenv..."
+if [ -d "$PYENV_ROOT/.git" ]; then
+  echo "Updating pyenv so Python $PY_VERSION is available..."
+  git -C "$PYENV_ROOT" fetch --tags origin
+  git -C "$PYENV_ROOT" pull --ff-only origin master
+fi
+
+echo "Ensuring Python $PY_VERSION via pyenv..."
 pyenv install -s "$PY_VERSION"
 
 pyenv local "$PY_VERSION"
