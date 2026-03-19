@@ -156,4 +156,4 @@ logger:
     homeassistant.config_entries: info
 
     # Your integration debug logging - shows EVERYTHING from your integration
-    custom_components.ha_integration_domain: debug
+    custom_components.petsafe_extended: debug

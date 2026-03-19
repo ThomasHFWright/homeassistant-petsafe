@@ -2,4 +2,4 @@
 config/
 !config/configuration.yaml
 custom_components/
-!custom_components/ha_integration_domain/
+!custom_components/petsafe_extended/

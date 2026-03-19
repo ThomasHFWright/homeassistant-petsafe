@@ -31,7 +31,7 @@ source "$SCRIPT_DIR/.lib/output.sh"
 # Configuration
 HA_CORE_DIR=".local/ha-core"
 HA_CORE_REPO="https://github.com/home-assistant/core.git"
-INTEGRATION_PATH="custom_components/ha_integration_domain"
+INTEGRATION_PATH="custom_components/petsafe_extended"
 
 # Detect Home Assistant version to use
 if [ -n "${HA_VERSION:-}" ]; then
