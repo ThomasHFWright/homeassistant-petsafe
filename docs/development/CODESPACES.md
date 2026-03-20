@@ -28,7 +28,7 @@ For the complete Copilot Agent workflow, see [COPILOT_AGENT.md](COPILOT_AGENT.md
 - ✅ Git configuration with your GitHub account
 - ✅ Port forwarding for Home Assistant (port 8123)
 - ✅ All VS Code extensions pre-installed
-- ✅ Python 3.13 environment with dependencies
+- ✅ Python 3.14.2 environment with dependencies
 - ✅ Home Assistant + HACS ready to use
 - ✅ All development scripts work identically
 
