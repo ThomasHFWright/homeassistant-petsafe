@@ -18,13 +18,8 @@
     // Optionally update apt package lists after container creation
     "APT_UPDATE": "0"
   },
-  "runArgs": [
-    "-e",
-    "GIT_EDITOR=code --wait",
-    "--security-opt",
-    "label=disable"
-  ],
-    "features": {
+  "runArgs": ["-e", "GIT_EDITOR=code --wait", "--security-opt", "label=disable"],
+  "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
