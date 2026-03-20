@@ -18,7 +18,13 @@
     // Optionally update apt package lists after container creation
     "APT_UPDATE": "0"
   },
-  "features": {
+  "runArgs": [
+    "-e",
+    "GIT_EDITOR=code --wait",
+    "--security-opt",
+    "label=disable"
+  ],
+    "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
@@ -66,6 +72,7 @@
         "python.analysis.autoImportCompletions": true,
         "python.analysis.diagnosticMode": "workspace",
         "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+        "python-envs.pythonProjects": [],
         "python.linting.pylintEnabled": false,
         "python.terminal.activateEnvironment": true,
         "python.terminal.activateEnvInCurrentTerminal": true,
@@ -129,10 +136,5 @@
       }
     }
   },
-  "mounts": [
-    // Mount host gitconfig for local development (ignored in Codespaces)
-    // In Codespaces, GitHub automatically configures Git with your account
-    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig.host,type=bind,consistency=cached,readonly"
-  ],
   "remoteUser": "vscode"
 }
