@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from importlib import metadata
 import logging
+from typing import TYPE_CHECKING, Any
 
 import httpx
-import petsafe
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -20,9 +21,12 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.httpx_client import get_async_client
+from homeassistant.helpers.importlib import DATA_IMPORT_FAILURES, async_import_module
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.loader import async_get_integration
+from homeassistant.requirements import RequirementsNotFound, _async_get_manager, async_process_requirements
 
 from .const import (
     ATTR_AMOUNT,
@@ -39,7 +43,67 @@ from .const import (
 )
 from .helpers import get_feeders_for_service
 
+if TYPE_CHECKING:
+    import petsafe
+
 _LOGGER = logging.getLogger(__name__)
+
+
+def _has_distribution(distribution_name: str) -> bool:
+    """Return whether a distribution is installed in the current interpreter."""
+    try:
+        metadata.distribution(distribution_name)
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+def _get_distribution_top_levels(distribution_name: str) -> list[str]:
+    """Return top-level module names advertised by a distribution."""
+    try:
+        dist = metadata.distribution(distribution_name)
+    except metadata.PackageNotFoundError:
+        return []
+
+    top_level = dist.read_text("top_level.txt")
+    if not top_level:
+        return []
+
+    return [line.strip() for line in top_level.splitlines() if line.strip()]
+
+
+async def _async_import_petsafe(hass: HomeAssistant) -> Any:
+    """Ensure the petsafe dependency is installed before importing it."""
+    integration = await async_get_integration(hass, DOMAIN)
+    manager = _async_get_manager(hass)
+
+    if not await hass.async_add_executor_job(_has_distribution, "petsafe-api"):
+        for requirement in integration.requirements:
+            manager.is_installed_cache.discard(requirement)
+            manager.install_failure_history.discard(requirement)
+
+    await async_process_requirements(hass, integration.domain, integration.requirements, integration.is_built_in)
+
+    if failure_cache := hass.data.get(DATA_IMPORT_FAILURES):
+        failure_cache.pop("petsafe", None)
+
+    try:
+        return await async_import_module(hass, "petsafe")
+    except ModuleNotFoundError:
+        top_levels = await hass.async_add_executor_job(_get_distribution_top_levels, "petsafe-api")
+        for module_name in top_levels:
+            if module_name == "petsafe":
+                continue
+            try:
+                module = await async_import_module(hass, module_name)
+            except ModuleNotFoundError:
+                continue
+
+            _LOGGER.warning("Imported petsafe-api using top-level module '%s'", module_name)
+            return module
+
+        raise
+
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -50,8 +114,37 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+def _entry_has_selected_devices(entry: ConfigEntry, key: str) -> bool:
+    """Return whether a config entry should load a device-specific platform."""
+    selected = entry.data.get(key)
+    return selected is None or len(selected) > 0
+
+
+def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
+    """Return only the platforms needed for the selected devices."""
+    platforms: list[Platform] = []
+
+    if _entry_has_selected_devices(entry, "feeders") or _entry_has_selected_devices(entry, "litterboxes"):
+        platforms.append(Platform.SENSOR)
+    if _entry_has_selected_devices(entry, "feeders"):
+        platforms.append(Platform.SWITCH)
+    if _entry_has_selected_devices(entry, "feeders") or _entry_has_selected_devices(entry, "litterboxes"):
+        platforms.append(Platform.BUTTON)
+    if _entry_has_selected_devices(entry, "litterboxes"):
+        platforms.append(Platform.SELECT)
+    if _entry_has_selected_devices(entry, "smartdoors"):
+        platforms.append(Platform.LOCK)
+
+    return platforms
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PetSafe Integration from a config entry."""
+    try:
+        petsafe = await _async_import_petsafe(hass)
+    except (ModuleNotFoundError, RequirementsNotFound) as err:
+        raise ConfigEntryNotReady("Unable to import the petsafe dependency") from err
+
     client = petsafe.PetSafeClient(
         entry.data.get(CONF_EMAIL),
         entry.data.get(CONF_TOKEN),
@@ -162,27 +255,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, SERVICE_PRIME, handle_prime)
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await coordinator.async_config_entry_first_refresh()
+
+    platforms = _get_entry_platforms(entry)
+    if platforms:
+        await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+    platforms = _get_entry_platforms(entry)
+    if not platforms:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        return True
+
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, platforms):
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
 
 
 class PetSafeData:
+    """Container for the devices returned by the PetSafe API."""
+
     def __init__(
         self,
         feeders: list[petsafe.devices.DeviceSmartFeed],
         litterboxes: list[petsafe.devices.DeviceScoopfree],
         smartdoors: list[petsafe.devices.DeviceSmartDoor],
     ):
+        """Initialize the cached PetSafe device data."""
         self.feeders = feeders
         self.litterboxes = litterboxes
         self.smartdoors = smartdoors
@@ -267,9 +371,9 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 self._authErrorCount += 1
                 if self._authErrorCount >= 5:
                     self._authErrorCount = 0
-                    raise ConfigEntryAuthFailed() from ex
+                    raise ConfigEntryAuthFailed from ex
 
             else:
-                raise UpdateFailed() from ex
+                raise UpdateFailed from ex
         except Exception as ex:
-            raise UpdateFailed() from ex
+            raise UpdateFailed from ex
