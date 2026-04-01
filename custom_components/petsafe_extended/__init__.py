@@ -7,9 +7,9 @@ from datetime import timedelta
 import importlib
 from importlib import metadata
 import logging
-import os
-import sys
 from pathlib import Path
+import subprocess
+import sys
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -77,16 +77,78 @@ def _get_distribution_top_levels(distribution_name: str) -> list[str]:
 
 def _ensure_deps_path(config_dir: str) -> None:
     """Ensure Home Assistant's config deps directory is importable."""
-    deps_path = os.path.join(config_dir, "deps")
+    deps_path = str(Path(config_dir) / "deps")
     if deps_path not in sys.path:
         sys.path.insert(0, deps_path)
 
 
-def _get_uv_archive_parent(module_name: str) -> str | None:
-    """Return the extracted uv archive path containing a module, if present."""
-    archive_root = Path.home() / ".cache" / "uv" / "archive-v0"
-    for module_init in archive_root.glob(f"*/{module_name}/__init__.py"):
+def _invalidate_import_state() -> None:
+    """Refresh Python's import caches after runtime requirement installation."""
+    importlib.invalidate_caches()
+    sys.path_importer_cache.clear()
+
+
+def _get_distribution_root(distribution_name: str, module_name: str) -> str | None:
+    """Return the import root for an installed distribution."""
+    try:
+        dist = metadata.distribution(distribution_name)
+    except metadata.PackageNotFoundError:
+        return None
+
+    module_init = dist.locate_file(f"{module_name}/__init__.py")
+    if module_init.exists():
         return str(module_init.parent.parent)
+
+    return None
+
+
+def _run_uv_command(*args: str) -> str | None:
+    """Return stdout from a uv command for the current interpreter."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "uv", *args],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    output = result.stdout.strip()
+    return output or None
+
+
+def _get_uv_install_location(distribution_name: str) -> str | None:
+    """Return uv's reported installation location for a distribution."""
+    if not (output := _run_uv_command("pip", "show", distribution_name)):
+        return None
+
+    for line in output.splitlines():
+        if line.startswith("Location:"):
+            location = line.partition(":")[2].strip()
+            if location:
+                return location
+
+    return None
+
+
+def _get_uv_cache_dir() -> Path | None:
+    """Return the active uv cache directory for the current interpreter."""
+    if not (output := _run_uv_command("cache", "dir")):
+        return None
+
+    cache_dir = Path(output)
+    return cache_dir if cache_dir.exists() else None
+
+
+def _get_uv_archive_parent(cache_dir: Path, module_name: str) -> str | None:
+    """Return the extracted uv archive path containing a module, if present."""
+    for archive_root in sorted(cache_dir.glob("archive-v*")):
+        for module_init in archive_root.glob(f"*/{module_name}/__init__.py"):
+            return str(module_init.parent.parent)
     return None
 
 
@@ -101,15 +163,42 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             manager.is_installed_cache.discard(requirement)
             manager.install_failure_history.discard(requirement)
 
-    await async_process_requirements(hass, integration.domain, integration.requirements, integration.is_built_in)
+    await async_process_requirements(
+        hass,
+        integration.domain,
+        integration.requirements,
+        integration.is_built_in,
+    )
+    await hass.async_add_executor_job(_invalidate_import_state)
 
     try:
         return await hass.async_add_executor_job(importlib.import_module, "petsafe")
     except ModuleNotFoundError:
-        if archive_parent := await hass.async_add_executor_job(_get_uv_archive_parent, "petsafe"):
-            if archive_parent not in sys.path:
-                sys.path.insert(0, archive_parent)
-            return await hass.async_add_executor_job(importlib.import_module, "petsafe")
+        candidate_roots = [
+            await hass.async_add_executor_job(_get_distribution_root, "petsafe-api", "petsafe"),
+            await hass.async_add_executor_job(_get_uv_install_location, "petsafe-api"),
+        ]
+
+        for import_root in candidate_roots:
+            if not import_root:
+                continue
+
+            if import_root not in sys.path:
+                sys.path.insert(0, import_root)
+
+            await hass.async_add_executor_job(_invalidate_import_state)
+            try:
+                return await hass.async_add_executor_job(importlib.import_module, "petsafe")
+            except ModuleNotFoundError:
+                continue
+
+        cache_dir: Path | None = await hass.async_add_executor_job(_get_uv_cache_dir)
+        if cache_dir:
+            if archive_parent := await hass.async_add_executor_job(_get_uv_archive_parent, cache_dir, "petsafe"):
+                if archive_parent not in sys.path:
+                    sys.path.insert(0, archive_parent)
+                await hass.async_add_executor_job(_invalidate_import_state)
+                return await hass.async_add_executor_job(importlib.import_module, "petsafe")
 
         top_levels = await hass.async_add_executor_job(_get_distribution_top_levels, "petsafe-api")
         for module_name in top_levels:
@@ -123,6 +212,16 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             _LOGGER.warning("Imported petsafe-api using top-level module '%s'", module_name)
             return module
 
+        _LOGGER.warning(
+            (
+                "petsafe-api installation did not yield an importable 'petsafe' module; "
+                "distribution_root=%s, uv_install_location=%s, uv_cache_dir=%s, home=%s"
+            ),
+            candidate_roots[0],
+            candidate_roots[1],
+            cache_dir,
+            Path.home(),
+        )
         raise
 
 
