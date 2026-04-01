@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import importlib
 from importlib import metadata
 import logging
+import os
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -23,7 +27,6 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.httpx_client import get_async_client
-from homeassistant.helpers.importlib import DATA_IMPORT_FAILURES, async_import_module
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.loader import async_get_integration
 from homeassistant.requirements import RequirementsNotFound, _async_get_manager, async_process_requirements
@@ -72,10 +75,26 @@ def _get_distribution_top_levels(distribution_name: str) -> list[str]:
     return [line.strip() for line in top_level.splitlines() if line.strip()]
 
 
+def _ensure_deps_path(config_dir: str) -> None:
+    """Ensure Home Assistant's config deps directory is importable."""
+    deps_path = os.path.join(config_dir, "deps")
+    if deps_path not in sys.path:
+        sys.path.insert(0, deps_path)
+
+
+def _get_uv_archive_parent(module_name: str) -> str | None:
+    """Return the extracted uv archive path containing a module, if present."""
+    archive_root = Path.home() / ".cache" / "uv" / "archive-v0"
+    for module_init in archive_root.glob(f"*/{module_name}/__init__.py"):
+        return str(module_init.parent.parent)
+    return None
+
+
 async def _async_import_petsafe(hass: HomeAssistant) -> Any:
     """Ensure the petsafe dependency is installed before importing it."""
     integration = await async_get_integration(hass, DOMAIN)
     manager = _async_get_manager(hass)
+    _ensure_deps_path(hass.config.config_dir)
 
     if not await hass.async_add_executor_job(_has_distribution, "petsafe-api"):
         for requirement in integration.requirements:
@@ -84,18 +103,20 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
 
     await async_process_requirements(hass, integration.domain, integration.requirements, integration.is_built_in)
 
-    if failure_cache := hass.data.get(DATA_IMPORT_FAILURES):
-        failure_cache.pop("petsafe", None)
-
     try:
-        return await async_import_module(hass, "petsafe")
+        return await hass.async_add_executor_job(importlib.import_module, "petsafe")
     except ModuleNotFoundError:
+        if archive_parent := await hass.async_add_executor_job(_get_uv_archive_parent, "petsafe"):
+            if archive_parent not in sys.path:
+                sys.path.insert(0, archive_parent)
+            return await hass.async_add_executor_job(importlib.import_module, "petsafe")
+
         top_levels = await hass.async_add_executor_job(_get_distribution_top_levels, "petsafe-api")
         for module_name in top_levels:
             if module_name == "petsafe":
                 continue
             try:
-                module = await async_import_module(hass, module_name)
+                module = await hass.async_add_executor_job(importlib.import_module, module_name)
             except ModuleNotFoundError:
                 continue
 
