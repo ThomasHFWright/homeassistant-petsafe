@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-# pylint: disable=wrong-import-position,import-error,too-few-public-methods
-
-import sys
-import types
 from pathlib import Path
 
+# pylint: disable=wrong-import-position,import-error,too-few-public-methods
+import sys
+import types
+
 import pytest
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_EMAIL, CONF_TOKEN
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_EMAIL, CONF_TOKEN
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -37,7 +38,7 @@ if "petsafe" not in sys.modules:
     sys.modules["petsafe"] = petsafe_module
     sys.modules["petsafe.const"] = petsafe_const
 
-from custom_components.petsafe.const import CONF_REFRESH_TOKEN, DOMAIN  # noqa: E402
+from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
 
 
 @pytest.fixture

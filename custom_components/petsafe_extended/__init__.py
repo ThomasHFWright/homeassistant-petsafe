@@ -579,6 +579,37 @@ class PetSafeCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._authErrorCount = 0
 
+    def _cached_snapshot(self) -> PetSafeData:
+        """Build a data snapshot from the coordinator caches."""
+        feeders = self._feeders if self._feeders is not None else (self.data.feeders if self.data else [])
+        litterboxes = (
+            self._litterboxes if self._litterboxes is not None else (self.data.litterboxes if self.data else [])
+        )
+        smartdoors = self._smartdoors if self._smartdoors is not None else (self.data.smartdoors if self.data else [])
+        return PetSafeData(feeders, litterboxes, smartdoors)
+
+    def _cache_smartdoor(self, door: petsafe.devices.DeviceSmartDoor) -> None:
+        """Store a SmartDoor in the in-memory cache."""
+        if self._smartdoors is None:
+            self._smartdoors = list(self.data.smartdoors) if self.data else []
+
+        for index, cached_door in enumerate(self._smartdoors):
+            if cached_door.api_name == door.api_name:
+                self._smartdoors[index] = door
+                return
+
+        self._smartdoors.append(door)
+
+    def _find_cached_smartdoor(self, api_name: str) -> petsafe.devices.DeviceSmartDoor | None:
+        """Return a cached SmartDoor by API name."""
+        if self._smartdoors is None and self.data:
+            self._smartdoors = list(self.data.smartdoors)
+
+        return next(
+            (smartdoor for smartdoor in self._smartdoors or [] if smartdoor.api_name == api_name),
+            None,
+        )
+
     async def get_feeders(self) -> list[petsafe.devices.DeviceSmartFeed]:
         """Return the list of feeders."""
         async with self._device_lock:
@@ -617,6 +648,51 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 else:
                     raise
             return self._smartdoors
+
+    async def async_refresh_smartdoor(
+        self,
+        api_name: str,
+        *,
+        expected_mode: str | None = None,
+        refresh_attempts: int = 4,
+        refresh_interval: float = 1.0,
+    ) -> petsafe.devices.DeviceSmartDoor:
+        """Refresh a SmartDoor after sending a command to it."""
+        attempts = max(refresh_attempts, 1)
+        refreshed_door: petsafe.devices.DeviceSmartDoor | None = None
+
+        for attempt in range(attempts):
+            async with self._device_lock:
+                door = self._find_cached_smartdoor(api_name)
+                if door is None:
+                    raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+
+                try:
+                    await door.update_data()
+                except httpx.HTTPStatusError as ex:
+                    if ex.response.status_code in (401, 403):
+                        await self.entry.async_start_reauth(self.hass)
+                    raise
+
+                self._cache_smartdoor(door)
+                refreshed_door = door
+                self.async_set_updated_data(self._cached_snapshot())
+
+                if expected_mode is None or door.mode == expected_mode:
+                    return door
+
+            if attempt < attempts - 1:
+                await asyncio.sleep(refresh_interval)
+
+        _LOGGER.debug(
+            "SmartDoor %s did not report expected mode %s after %s refresh attempts",
+            api_name,
+            expected_mode,
+            attempts,
+        )
+        if refreshed_door is None:
+            raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+        return refreshed_door
 
     async def _async_update_data(self) -> PetSafeData:
         """Fetch data from API endpoint."""

@@ -5,19 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import petsafe
+from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART
+
 from homeassistant.components.lock import LockEntity
 from homeassistant.const import ATTR_BATTERY_LEVEL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
-import petsafe
-
-from petsafe.const import (
-    SMARTDOOR_MODE_MANUAL_LOCKED,
-    SMARTDOOR_MODE_MANUAL_UNLOCKED,
-    SMARTDOOR_MODE_SMART,
-)
 
 from . import PetSafeCoordinator, PetSafeData
 from .const import DOMAIN, MANUFACTURER
@@ -36,6 +31,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         *,
         name: str | None = None,
     ) -> None:
+        """Initialize the SmartDoor lock entity."""
         super().__init__(coordinator)
         self._door = device
         self._attr_has_entity_name = True
@@ -56,6 +52,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any]:
+        """Return additional SmartDoor state attributes."""
         door = self._door
         if door is None:
             return {}
@@ -73,6 +70,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
 
     @property
     def available(self) -> bool:
+        """Return whether the SmartDoor is currently available."""
         door = self._door
         if door is None:
             return False
@@ -81,6 +79,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
 
     @property
     def is_locked(self) -> bool | None:
+        """Return whether the SmartDoor is currently locked."""
         door = self._door
         if door is None:
             return None
@@ -94,6 +93,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
 
     @property
     def is_open(self) -> bool | None:
+        """Return whether the SmartDoor latch is currently open."""
         door = self._door
         if door is None:
             return None
@@ -104,19 +104,42 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         return latch_state.lower() == "open"
 
     async def async_lock(self, **kwargs: Any) -> None:
+        """Lock the SmartDoor and immediately refresh its state."""
         if self._door is None:
             return
-        await self._door.lock(update_data=False)
-        await self.coordinator.async_request_refresh()
+        self._door = await self._async_execute_door_command(
+            self._door.lock,
+            expected_mode=SMARTDOOR_MODE_MANUAL_LOCKED,
+        )
 
     async def async_unlock(self, **kwargs: Any) -> None:
+        """Unlock the SmartDoor and immediately refresh its state."""
         if self._door is None:
             return
-        await self._door.unlock(update_data=False)
-        await self.coordinator.async_request_refresh()
+        self._door = await self._async_execute_door_command(
+            self._door.unlock,
+            expected_mode=SMARTDOOR_MODE_MANUAL_UNLOCKED,
+        )
 
     async def async_update(self) -> None:
+        """Request a full coordinator refresh."""
         await self.coordinator.async_request_refresh()
+
+    async def _async_execute_door_command(
+        self,
+        command: Any,
+        *,
+        expected_mode: str,
+    ) -> petsafe.devices.DeviceSmartDoor:
+        """Execute a SmartDoor command and refresh its live state immediately."""
+        if self._door is None:
+            raise RuntimeError("SmartDoor device is not initialized")
+
+        await command(update_data=False)
+        return await self.coordinator.async_refresh_smartdoor(
+            self._door.api_name,
+            expected_mode=expected_mode,
+        )
 
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
@@ -124,11 +147,7 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
             return
 
         door = next(
-            (
-                smartdoor
-                for smartdoor in data.smartdoors
-                if smartdoor.api_name == self._door.api_name
-            ),
+            (smartdoor for smartdoor in data.smartdoors if smartdoor.api_name == self._door.api_name),
             None,
         )
         if door is not None:
