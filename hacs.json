@@ -1,4 +1,5 @@
 {
-    "name": "PetSafe",
-    "render_readme": true
+  "name": "PetSafe Extended",
+  "homeassistant": "2025.12.3",
+  "hacs": "2.0.5"
 }

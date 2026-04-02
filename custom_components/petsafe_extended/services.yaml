@@ -1,0 +1,93 @@
+add_schedule:
+  name: Add feeding schedule
+  description: Add a feeding schedule
+  target:
+    entity:
+      integration: petsafe
+  fields:
+    time:
+      name: Time
+      description: The time when the feeding should occur
+      required: true
+      selector:
+        time:
+    amount:
+      name: Amount
+      description: The feeding amount in 1/8 cup
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+
+delete_schedule:
+  name: Delete schedule
+  description: Delete a feeding schedule
+  target:
+    entity:
+      integration: petsafe
+  fields:
+    time:
+      name: Time
+      description: The time when the feeding to delete
+      required: true
+      selector:
+        time:
+
+delete_all_schedules:
+  name: Delete all schedules
+  description: Delete all feeding schedules
+  target:
+    entity:
+      integration: petsafe
+
+modify_schedule:
+  name: Modify schedule
+  description: Modify an existing feeding schedule
+  target:
+    entity:
+      integration: petsafe
+  fields:
+    time:
+      name: Time
+      description: The time of the feeding to modify
+      required: true
+      selector:
+        time:
+    amount:
+      name: Amount
+      description: The feeding amount in 1/8 cup
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+
+feed:
+  name: Feed a meal
+  description: Trigger the feeder to begin feeding a meal
+  target:
+    entity:
+      integration: petsafe
+  fields:
+    amount:
+      name: Amount
+      description: The feeding amount in 1/8 cup
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+    slow_feed:
+      name: Slow Feed
+      description: Whether to use slow feed mode. If not specified, uses the current feeder setting.
+      required: false
+      selector:
+        boolean:
+
+prime:
+  name: Prime the feeder
+  description: Feeds 5/8 cups to prime the feeder
+  target:
+    entity:
+      integration: petsafe

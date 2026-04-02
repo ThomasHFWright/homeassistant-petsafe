@@ -1,0 +1,16 @@
+{
+  "domain": "petsafe_extended",
+  "name": "PetSafe Extended",
+  "codeowners": [
+    "@ThomasHFWright"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/ThomasHFWright/homeassistant-petsafe",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ThomasHFWright/homeassistant-petsafe/issues",
+  "requirements": [
+    "petsafe-api==3.0.3"
+  ],
+  "version": "0.1.0"
+}

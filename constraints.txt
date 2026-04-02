@@ -1,2 +1,0 @@
--c https://raw.githubusercontent.com/home-assistant/core/2025.9.1/homeassistant/package_constraints.txt
-josepy==2.1.0
