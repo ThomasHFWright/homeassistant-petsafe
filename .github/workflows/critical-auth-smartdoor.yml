@@ -45,7 +45,7 @@ jobs:
             ha-venv-${{ runner.os }}-py314-
 
       - name: Install requirements
-        run: script/setup/bootstrap
+        run: bash script/setup/bootstrap
 
       - name: Run critical checks
-        run: script/check-critical
+        run: bash script/check-critical

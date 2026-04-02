@@ -65,7 +65,7 @@ log_header "Running targeted type checks"
 pyright "${CRITICAL_PY_FILES[@]}"
 
 log_header "Running critical auth, polling, and SmartDoor tests"
-"$SCRIPT_DIR/test-critical"
+bash "$SCRIPT_DIR/test-critical"
 
 # Clean up any accidental package installation from tooling
 "$SCRIPT_DIR/clean" --minimal
