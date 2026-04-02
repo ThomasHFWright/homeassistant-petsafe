@@ -1,41 +1,18 @@
-"""
-Base entity class for petsafe_extended.
-
-This module provides the base entity class that all integration entities inherit from.
-It handles common functionality like device info, unique IDs, and coordinator integration.
-
-For more information on entities:
-https://developers.home-assistant.io/docs/core/entity
-https://developers.home-assistant.io/docs/core/entity/index/#common-properties
-"""
+"""Base entity helpers for petsafe_extended."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from custom_components.petsafe_extended.const import ATTRIBUTION
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
-from homeassistant.helpers.device_registry import DeviceInfo
+from custom_components.petsafe_extended.entity_utils import create_device_info_from_device
+from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
-if TYPE_CHECKING:
-    from homeassistant.helpers.entity import EntityDescription
 
 
 class PetSafeExtendedEntity(CoordinatorEntity[PetSafeExtendedDataUpdateCoordinator]):
-    """
-    Base entity class for petsafe_extended.
-
-    All entities in this integration inherit from this class, which provides:
-    - Automatic coordinator updates
-    - Device info management
-    - Unique ID generation
-    - Attribution and naming conventions
-
-    For more information:
-    https://developers.home-assistant.io/docs/core/entity
-    https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
-    """
+    """Base entity for PetSafe devices backed by the coordinator."""
 
     _attr_attribution = ATTRIBUTION
     _attr_has_entity_name = True
@@ -43,28 +20,18 @@ class PetSafeExtendedEntity(CoordinatorEntity[PetSafeExtendedDataUpdateCoordinat
     def __init__(
         self,
         coordinator: PetSafeExtendedDataUpdateCoordinator,
+        api_name: str,
         entity_description: EntityDescription,
+        device: Any,
+        *,
+        default_model: str | None = None,
     ) -> None:
-        """
-        Initialize the base entity.
-
-        Args:
-            coordinator: The data update coordinator for this entity.
-            entity_description: The entity description defining characteristics.
-
-        """
+        """Initialize the base entity."""
         super().__init__(coordinator)
+        self._api_name = api_name
         self.entity_description = entity_description
-        # Include entity description key in unique_id to support multiple entities
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{entity_description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (
-                    coordinator.config_entry.domain,
-                    coordinator.config_entry.entry_id,
-                ),
-            },
-            name=coordinator.config_entry.title,
-            manufacturer=coordinator.config_entry.domain,
-            model=coordinator.data.get("model", "Unknown"),
+        self._attr_unique_id = f"{api_name}_{entity_description.key}"
+        self._attr_device_info = create_device_info_from_device(
+            device,
+            default_model=default_model,
         )

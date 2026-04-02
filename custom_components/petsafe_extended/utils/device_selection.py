@@ -1,26 +1,20 @@
-"""Helper utilities for targeting PetSafe feeder devices."""
+"""Helpers for selecting configured PetSafe devices."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import TypeVar
 
-from homeassistant.config_entries import ConfigEntryState
+from custom_components.petsafe_extended.const import DOMAIN, FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry, DeviceRegistry
-
-from .const import DOMAIN, FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2
 
 _T = TypeVar("_T")
 
 
 def filter_selected_devices(devices: Iterable[_T], selected_ids: list[str] | None) -> list[_T]:
-    """Filter devices by selected API names.
-
-    A missing selection means all devices for backward compatibility.
-    An empty list means the user explicitly selected none.
-    """
+    """Filter devices by selected API names."""
     device_list = list(devices)
     if selected_ids is None:
         return device_list
@@ -41,28 +35,11 @@ def get_feeders_for_service(
     entity_reg = er.async_get(hass)
 
     if area_ids is not None:
-        matched_devices = get_feeders_by_area_id(
-            hass,
-            device_reg,
-            entity_reg,
-            area_ids,
-            matched_devices,
-        )
+        matched_devices = get_feeders_by_area_id(hass, device_reg, entity_reg, area_ids, matched_devices)
     if device_ids is not None:
-        matched_devices = get_feeders_by_device_id(
-            hass,
-            device_reg,
-            device_ids,
-            matched_devices,
-        )
+        matched_devices = get_feeders_by_device_id(hass, device_reg, device_ids, matched_devices)
     if entity_ids is not None:
-        matched_devices = get_feeders_by_entity_id(
-            hass,
-            device_reg,
-            entity_reg,
-            entity_ids,
-            matched_devices,
-        )
+        matched_devices = get_feeders_by_entity_id(hass, device_reg, entity_reg, entity_ids, matched_devices)
 
     return matched_devices
 
@@ -78,20 +55,14 @@ def get_feeders_by_area_id(
     matched = [] if matched_devices is None else matched_devices
 
     for area_id in area_ids:
-        devices = dr.async_entries_for_area(device_reg, area_id)
-        device_ids: list[str] = []
-        for device in devices:
-            if device.id not in device_ids:
-                device_ids.append(device.id)
+        device_ids = [device.id for device in dr.async_entries_for_area(device_reg, area_id)]
+        entity_ids = [entity.id for entity in er.async_entries_for_area(entity_reg, area_id)]
 
-        entities = er.async_entries_for_area(entity_reg, area_id)
-        entity_ids: list[str] = []
-        for entity in entities:
-            if entity.id not in entity_ids:
-                entity_ids.append(entity.id)
+        for api_name in get_feeders_by_device_id(hass, device_reg, device_ids):
+            if api_name not in matched:
+                matched.append(api_name)
 
-        devices_from_registry = get_feeders_by_device_id(hass, device_reg, device_ids)
-        for api_name in devices_from_registry:
+        for api_name in get_feeders_by_entity_id(hass, device_reg, entity_reg, entity_ids):
             if api_name not in matched:
                 matched.append(api_name)
 
@@ -111,10 +82,12 @@ def get_feeders_by_device_id(
         device_entry = device_reg.async_get(device_id)
         if not is_device_feeder(hass, device_entry):
             continue
+        if device_entry is None:
+            continue
 
-        api_name = next(iter(device_entry.identifiers))[1]
-        if api_name not in matched:
-            matched.append(api_name)
+        for identifier_domain, identifier_value in device_entry.identifiers:
+            if identifier_domain == DOMAIN and identifier_value not in matched:
+                matched.append(identifier_value)
 
     return matched
 
@@ -131,7 +104,7 @@ def get_feeders_by_entity_id(
 
     for entity_id in entity_ids:
         entity_entry = entity_reg.async_get(entity_id)
-        if entity_entry is None:
+        if entity_entry is None or entity_entry.device_id is None:
             continue
 
         for api_name in get_feeders_by_device_id(hass, device_reg, [entity_entry.device_id]):
@@ -143,21 +116,14 @@ def get_feeders_by_entity_id(
 
 def is_device_feeder(hass: HomeAssistant, device: DeviceEntry | None) -> bool:
     """Return whether a Home Assistant device entry represents a loaded feeder."""
-    if device is None or device.model not in [FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2]:
+    if device is None or device.model not in {FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2}:
         return False
 
-    config_entry_ids = device.config_entries
-    entry = next(
-        (
-            config_entry
-            for config_entry in hass.config_entries.async_entries(DOMAIN)
-            if config_entry.entry_id in config_entry_ids
-        ),
-        None,
-    )
-    if entry and entry.state != ConfigEntryState.LOADED:
-        return False
-    if entry is None or DOMAIN not in hass.data or entry.entry_id not in hass.data[DOMAIN]:
-        return False
+    for config_entry in hass.config_entries.async_entries(DOMAIN):
+        if config_entry.entry_id not in device.config_entries:
+            continue
+        if getattr(config_entry, "runtime_data", None) is None:
+            return False
+        return True
 
-    return True
+    return False

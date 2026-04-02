@@ -9,16 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from custom_components.petsafe_extended import (
-    PetSafeCoordinator,
-    PetSafeData,
-    button as button_platform,
-    lock as lock_platform,
-    select as select_platform,
-    sensor as sensor_platform,
-    switch as switch_platform,
-)
-from custom_components.petsafe_extended.const import DOMAIN
+import custom_components.petsafe_extended.button as button_platform
+from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
+from custom_components.petsafe_extended.data import PetSafeExtendedCoordinatorData
+import custom_components.petsafe_extended.lock as lock_platform
+import custom_components.petsafe_extended.select as select_platform
+import custom_components.petsafe_extended.sensor as sensor_platform
+import custom_components.petsafe_extended.switch as switch_platform
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
 
@@ -48,7 +45,7 @@ async def test_polling_auth_failure_raises_reauth_immediately(hass, mock_config_
     api.get_feeders = AsyncMock(side_effect=_build_auth_error())
     api.get_litterboxes = AsyncMock(return_value=[])
     api.get_smartdoors = AsyncMock(return_value=[])
-    coordinator = PetSafeCoordinator(hass, api, mock_config_entry)
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
 
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator._async_update_data()  # noqa: SLF001
@@ -57,8 +54,8 @@ async def test_polling_auth_failure_raises_reauth_immediately(hass, mock_config_
 @pytest.mark.asyncio
 async def test_smartdoor_refresh_auth_failure_raises_reauth(hass, mock_config_entry) -> None:
     """SmartDoor command refreshes should raise auth failures immediately."""
-    coordinator = PetSafeCoordinator(hass, MagicMock(), mock_config_entry)
-    coordinator.data = PetSafeData([], [], [_create_smartdoor()])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[_create_smartdoor()])
 
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator.async_refresh_smartdoor("door-1", refresh_attempts=1, refresh_interval=0)
@@ -78,13 +75,14 @@ async def test_smartdoor_refresh_auth_failure_raises_reauth(hass, mock_config_en
 async def test_platform_setup_propagates_auth_failures(
     hass,
     mock_config_entry,
+    attach_runtime_data,
     platform_module,
     coordinator_method: str,
 ) -> None:
     """Platform setup should propagate auth failures instead of masking them."""
-    coordinator = PetSafeCoordinator(hass, MagicMock(), mock_config_entry)
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
     mock_config_entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = coordinator
+    attach_runtime_data(mock_config_entry, coordinator)
 
     with (
         patch.object(coordinator, coordinator_method, AsyncMock(side_effect=ConfigEntryAuthFailed)),

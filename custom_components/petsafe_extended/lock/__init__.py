@@ -1,4 +1,4 @@
-"""Select platform for petsafe_extended."""
+"""Lock platform for petsafe_extended."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .litterbox_rake_timer import LITTERBOX_SELECT_DESCRIPTIONS, PetSafeExtendedLitterboxSelect
+from .smartdoor import PetSafeExtendedSmartDoorLock
 
 
 async def async_setup_entry(
@@ -16,21 +16,17 @@ async def async_setup_entry(
     entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the select platform."""
+    """Set up the SmartDoor lock platform."""
     del hass
     coordinator = entry.runtime_data.coordinator
 
     try:
-        litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
+        smartdoors = filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
     except ConfigEntryAuthFailed:
         raise
     except Exception as err:
-        raise ConfigEntryNotReady("Failed to retrieve PetSafe scoopfree devices") from err
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe SmartDoor devices") from err
 
-    entities = [
-        PetSafeExtendedLitterboxSelect(coordinator, litterbox, description)
-        for litterbox in litterboxes
-        for description in LITTERBOX_SELECT_DESCRIPTIONS
-    ]
+    entities = [PetSafeExtendedSmartDoorLock(coordinator, smartdoor) for smartdoor in smartdoors]
     if entities:
         async_add_entities(entities)

@@ -2,128 +2,44 @@
 
 from __future__ import annotations
 
-from custom_components.petsafe_extended import PetSafeCoordinator, SensorEntities
-from custom_components.petsafe_extended.const import DOMAIN
-from custom_components.petsafe_extended.helpers import filter_selected_devices
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
+from custom_components.petsafe_extended.utils import filter_selected_devices
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .feeder import FEEDER_SENSOR_DESCRIPTIONS, PetSafeExtendedFeederSensor
+from .litterbox import LITTERBOX_SENSOR_DESCRIPTIONS, PetSafeExtendedLitterboxSensor
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    coordinator: PetSafeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    del hass
+    coordinator = entry.runtime_data.coordinator
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
     except ConfigEntryAuthFailed:
         raise
-    except Exception as exc:
-        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from exc
+    except Exception as err:
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from err
 
-    entities = []
-    for feeder in feeders:
-        entities.append(
-            SensorEntities.PetSafeFeederSensorEntity(
-                hass=hass,
-                name="Battery Level",
-                device_class="battery",
-                device_type="battery",
-                device=feeder,
-                coordinator=coordinator,
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeFeederSensorEntity(
-                hass=hass,
-                name="Last Feeding",
-                device_type="last_feeding",
-                device_class="timestamp",
-                device=feeder,
-                coordinator=coordinator,
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeFeederSensorEntity(
-                hass=hass,
-                name="Next Feeding",
-                device_type="next_feeding",
-                device_class="timestamp",
-                device=feeder,
-                coordinator=coordinator,
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeFeederSensorEntity(
-                hass=hass,
-                name="Food Level",
-                device_type="food_level",
-                device=feeder,
-                coordinator=coordinator,
-                icon="mdi:bowl",
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeFeederSensorEntity(
-                hass=hass,
-                name="Signal Strength",
-                device_type="signal_strength",
-                device=feeder,
-                coordinator=coordinator,
-                device_class="signal_strength",
-                entity_category=EntityCategory.DIAGNOSTIC,
-            )
-        )
-
-    for litterbox in litterboxes:
-        entities.append(
-            SensorEntities.PetSafeLitterboxSensorEntity(
-                hass=hass,
-                name="Rake Counter",
-                device_type="rake_counter",
-                device=litterbox,
-                coordinator=coordinator,
-                icon="mdi:rake",
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeLitterboxSensorEntity(
-                hass=hass,
-                name="Rake Status",
-                device_type="rake_status",
-                device=litterbox,
-                coordinator=coordinator,
-                icon="mdi:rake",
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeLitterboxSensorEntity(
-                hass=hass,
-                name="Signal Strength",
-                device_type="signal_strength",
-                device=litterbox,
-                coordinator=coordinator,
-                device_class="signal_strength",
-                entity_category=EntityCategory.DIAGNOSTIC,
-            )
-        )
-        entities.append(
-            SensorEntities.PetSafeLitterboxSensorEntity(
-                hass=hass,
-                name="Last Cleaning",
-                device_type="last_cleaning",
-                device=litterbox,
-                coordinator=coordinator,
-                device_class="timestamp",
-            )
-        )
+    entities: list[SensorEntity] = [
+        PetSafeExtendedFeederSensor(coordinator, feeder, description)
+        for feeder in feeders
+        for description in FEEDER_SENSOR_DESCRIPTIONS
+    ]
+    entities.extend(
+        PetSafeExtendedLitterboxSensor(coordinator, litterbox, description)
+        for litterbox in litterboxes
+        for description in LITTERBOX_SENSOR_DESCRIPTIONS
+    )
 
     if entities:
         async_add_entities(entities)
