@@ -14,5 +14,7 @@ cd "$SCRIPT_DIR/.."
 "$SCRIPT_DIR/test" \
     tests/test_config_flow.py \
     tests/test_coordinator_auth.py \
+    tests/test_feeder.py \
+    tests/test_litterbox.py \
     tests/test_smartdoor.py \
     "$@"

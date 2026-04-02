@@ -51,7 +51,7 @@ Forbidden packages: `helpers/`, `ha_helpers/`, `common/`, `shared/`, `lib/`. Use
 Key patterns:
 
 - Entity MRO: `(PlatformEntity, PetSafeExtendedEntity)`
-- Unique ID: `{entry_id}_{description.key}`
+- Preserve existing unique IDs for backward compatibility; current device entities use `{api_name}_{description.key}`
 - Services: register in `async_setup()`, not `async_setup_entry()`
 - Config entry data: `entry.runtime_data.client` / `entry.runtime_data.coordinator`
 
@@ -66,7 +66,7 @@ Key patterns:
 
 Do not write tests unless explicitly requested.
 
-Exception: when touching authentication, polling, or SmartDoor logic, agents must add or update focused tests and run `script/check-critical` before considering the work complete. These critical-path tests must not be skipped because of unrelated repo issues.
+Exception: when touching authentication, polling, or SmartDoor logic, agents must add or update focused tests, run `script/check-critical`, and rerun devcontainer E2E/runtime validation before considering the work complete. For PR follow-up fixes on those paths, rerun the devcontainer runtime validation again after the latest patch instead of relying on an earlier pass. These critical-path checks must not be skipped because of unrelated repo issues.
 
 Translation strategy:
 
@@ -105,6 +105,16 @@ pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script
 ```
 
 Restart HA after modifying Python files, `manifest.json`, `services.yaml`, translations, or config flow changes.
+
+If you start Home Assistant for testing, debugging, or runtime validation, stop it again before finishing unless the developer explicitly asks you to leave it running. This includes detached `./script/develop` runs and VS Code/debugpy-launched Home Assistant processes.
+
+Before you say cleanup is complete, you must:
+
+1. Stop all matching `hass`/`homeassistant` processes for this repo.
+2. Stop any related `debugpy` processes.
+3. Verify no matching processes remain.
+4. Remove a stale `config/.ha_run.lock` if no HA process remains.
+5. Verify port `8123` is free.
 
 Validate changes:
 

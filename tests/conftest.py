@@ -7,7 +7,8 @@ from pathlib import Path
 # pylint: disable=wrong-import-position,import-error,too-few-public-methods
 import sys
 import types
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -56,6 +57,7 @@ if "petsafe" not in sys.modules:
     sys.modules["petsafe.const"] = petsafe_const
 
 from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
+from custom_components.petsafe_extended.data import PetSafeExtendedRuntimeData
 
 
 @pytest.fixture
@@ -72,3 +74,27 @@ def mock_config_entry() -> MockConfigEntry:
         },
         unique_id="test_entry",
     )
+
+
+@pytest.fixture
+def attach_runtime_data():
+    """Attach runtime data to a config entry for platform tests."""
+
+    def _attach(entry: MockConfigEntry, coordinator: Any, client: Any | None = None) -> MockConfigEntry:
+        entry.runtime_data = PetSafeExtendedRuntimeData(
+            client=client or SimpleNamespace(),
+            coordinator=coordinator,
+            integration=cast(
+                Any,
+                SimpleNamespace(
+                    name="PetSafe Extended",
+                    version="0.1.0",
+                    domain=DOMAIN,
+                    documentation="https://example.com/docs",
+                    issue_tracker="https://example.com/issues",
+                ),
+            ),
+        )
+        return entry
+
+    return _attach

@@ -2,63 +2,44 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from custom_components.petsafe_extended import ButtonEntities, PetSafeCoordinator
-from custom_components.petsafe_extended.const import DOMAIN
-from custom_components.petsafe_extended.helpers import filter_selected_devices
-from homeassistant.config_entries import ConfigEntry
+from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
+from custom_components.petsafe_extended.utils import filter_selected_devices
+from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .feeder_feed import FEEDER_BUTTON_DESCRIPTIONS, PetSafeExtendedFeederButton
+from .litterbox_action import LITTERBOX_BUTTON_DESCRIPTIONS, PetSafeExtendedLitterboxButton
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the button platform."""
-    coordinator: PetSafeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    del hass
+    coordinator = entry.runtime_data.coordinator
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
     except ConfigEntryAuthFailed:
         raise
-    except Exception as exc:
-        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from exc
+    except Exception as err:
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from err
 
-    entities: list[Any] = [
-        ButtonEntities.PetSafeFeederButtonEntity(
-            hass=hass,
-            name="Feed",
-            device_type="feed",
-            device=feeder,
-            coordinator=coordinator,
-        )
+    entities: list[ButtonEntity] = [
+        PetSafeExtendedFeederButton(coordinator, feeder, description)
         for feeder in feeders
+        for description in FEEDER_BUTTON_DESCRIPTIONS
     ]
-
-    for litterbox in litterboxes:
-        entities.append(
-            ButtonEntities.PetSafeLitterboxButtonEntity(
-                hass=hass,
-                name="Clean",
-                device_type="clean",
-                device=litterbox,
-                coordinator=coordinator,
-            )
-        )
-        entities.append(
-            ButtonEntities.PetSafeLitterboxButtonEntity(
-                hass=hass,
-                name="Reset",
-                device_type="reset",
-                device=litterbox,
-                coordinator=coordinator,
-            )
-        )
+    entities.extend(
+        PetSafeExtendedLitterboxButton(coordinator, litterbox, description)
+        for litterbox in litterboxes
+        for description in LITTERBOX_BUTTON_DESCRIPTIONS
+    )
 
     if entities:
         async_add_entities(entities)

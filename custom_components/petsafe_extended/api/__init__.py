@@ -1,32 +1,9 @@
-"""
-API package for petsafe_extended.
+"""PetSafe API dependency helpers."""
 
-Architecture:
-    Three-layer data flow: Entities → Coordinator → API Client.
-    Only the coordinator should call the API client. Entities must never
-    import or call the API client directly.
-
-Exception hierarchy:
-    PetSafeExtendedApiClientError (base)
-    ├── PetSafeExtendedApiClientCommunicationError (network/timeout)
-    └── PetSafeExtendedApiClientAuthenticationError (401/403)
-
-Coordinator exception mapping:
-    ApiClientAuthenticationError → ConfigEntryAuthFailed (triggers reauth)
-    ApiClientCommunicationError → UpdateFailed (auto-retry)
-    ApiClientError             → UpdateFailed (auto-retry)
-"""
-
-from .client import (
-    PetSafeExtendedApiClient,
-    PetSafeExtendedApiClientAuthenticationError,
-    PetSafeExtendedApiClientCommunicationError,
-    PetSafeExtendedApiClientError,
-)
+from .client import async_create_auth_client, async_import_petsafe, create_petsafe_client
 
 __all__ = [
-    "PetSafeExtendedApiClient",
-    "PetSafeExtendedApiClientAuthenticationError",
-    "PetSafeExtendedApiClientCommunicationError",
-    "PetSafeExtendedApiClientError",
+    "async_create_auth_client",
+    "async_import_petsafe",
+    "create_petsafe_client",
 ]

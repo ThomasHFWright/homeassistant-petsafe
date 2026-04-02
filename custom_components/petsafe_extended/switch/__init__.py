@@ -2,66 +2,35 @@
 
 from __future__ import annotations
 
-from custom_components.petsafe_extended import PetSafeCoordinator, SwitchEntities
-from custom_components.petsafe_extended.const import DOMAIN
-from custom_components.petsafe_extended.helpers import filter_selected_devices
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
+from custom_components.petsafe_extended.utils import filter_selected_devices
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .feeder_control import FEEDER_SWITCH_DESCRIPTIONS, PetSafeExtendedFeederSwitch
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the switch platform."""
-    coordinator: PetSafeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    del hass
+    coordinator = entry.runtime_data.coordinator
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
     except ConfigEntryAuthFailed:
         raise
-    except Exception as exc:
-        raise ConfigEntryNotReady("Failed to retrieve PetSafe SmartFeed devices") from exc
+    except Exception as err:
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe SmartFeed devices") from err
 
-    entities = []
-    for feeder in feeders:
-        entities.append(
-            SwitchEntities.PetSafeFeederSwitchEntity(
-                hass=hass,
-                name="Feeding Paused",
-                device_type="feeding_paused",
-                icon="mdi:pause",
-                device=feeder,
-                coordinator=coordinator,
-                entity_category=EntityCategory.CONFIG,
-            )
-        )
-        entities.append(
-            SwitchEntities.PetSafeFeederSwitchEntity(
-                hass=hass,
-                name="Child Lock",
-                device_type="child_lock",
-                icon="mdi:lock-open",
-                device=feeder,
-                coordinator=coordinator,
-                entity_category=EntityCategory.CONFIG,
-            )
-        )
-        entities.append(
-            SwitchEntities.PetSafeFeederSwitchEntity(
-                hass=hass,
-                name="Slow Feed",
-                device_type="slow_feed",
-                icon="mdi:tortoise",
-                device=feeder,
-                coordinator=coordinator,
-                entity_category=EntityCategory.CONFIG,
-            )
-        )
-
+    entities = [
+        PetSafeExtendedFeederSwitch(coordinator, feeder, description)
+        for feeder in feeders
+        for description in FEEDER_SWITCH_DESCRIPTIONS
+    ]
     if entities:
         async_add_entities(entities)

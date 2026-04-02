@@ -100,7 +100,7 @@ async def test_user_flow_creates_entry_with_account_unique_id(hass) -> None:
     petsafe_module = _build_petsafe_module(id_token=id_token)
 
     with patch(
-        "custom_components.petsafe_extended.config_flow._async_import_petsafe",
+        "custom_components.petsafe_extended.config_flow_handler.config_flow.async_import_petsafe",
         AsyncMock(return_value=petsafe_module),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -152,7 +152,7 @@ async def test_user_flow_aborts_when_account_is_already_configured(hass) -> None
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.petsafe_extended.config_flow._async_import_petsafe",
+        "custom_components.petsafe_extended.config_flow_handler.config_flow.async_import_petsafe",
         AsyncMock(return_value=petsafe_module),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -172,7 +172,7 @@ async def test_user_flow_shows_invalid_code_error(hass) -> None:
     )
 
     with patch(
-        "custom_components.petsafe_extended.config_flow._async_import_petsafe",
+        "custom_components.petsafe_extended.config_flow_handler.config_flow.async_import_petsafe",
         AsyncMock(return_value=petsafe_module),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -208,7 +208,7 @@ async def test_reauth_flow_updates_existing_entry_tokens(hass) -> None:
 
     with (
         patch(
-            "custom_components.petsafe_extended.config_flow._async_import_petsafe",
+            "custom_components.petsafe_extended.config_flow_handler.config_flow.async_import_petsafe",
             AsyncMock(return_value=petsafe_module),
         ),
         patch.object(hass.config_entries, "async_schedule_reload") as mock_reload,
