@@ -41,10 +41,37 @@ jobs:
         run: bash script/setup/bootstrap
 
       - name: Run critical checks
+        id: critical_checks
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           bash script/check-critical 2>&1 | tee critical-check.log
+
+      - name: Surface critical check failure
+        if: steps.critical_checks.outcome == 'failure'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          log_text = Path("critical-check.log").read_text(encoding="utf-8", errors="replace")
+          log_text = re.sub(r"\x1b\[[0-9;]*m", "", log_text)
+          tail = "\n".join(log_text.splitlines()[-40:]).strip() or "critical-check.log was empty"
+          if len(tail) > 3000:
+              tail = tail[-3000:]
+
+          print("Last lines of critical-check.log:")
+          print(tail)
+
+          annotation = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(
+              "::error file=.github/workflows/critical-auth-smartdoor.yml,line=1::"
+              f"{annotation}"
+          )
+          PY
+          exit 1
 
       - name: Upload critical check log
         if: failure()

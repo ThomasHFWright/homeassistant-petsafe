@@ -16,6 +16,7 @@ import sys
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
+from packaging.requirements import InvalidRequirement, Requirement
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -32,8 +33,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.loader import async_get_integration
-from homeassistant.requirements import RequirementsNotFound, _async_get_manager, async_process_requirements, pip_kwargs
-from homeassistant.util import package as pkg_util
+from homeassistant.requirements import RequirementsNotFound, _async_get_manager, pip_kwargs
 
 from .const import (
     ATTR_AMOUNT,
@@ -119,8 +119,9 @@ def _install_requirement_to_target(
     module_name: str,
 ) -> bool:
     """Install a requirement into an explicit target and verify the module files exist."""
-    requirement_details = pkg_util.parse_requirement_safe(requirement)
-    if requirement_details is None:
+    try:
+        requirement_details = Requirement(requirement)
+    except InvalidRequirement:
         return False
 
     target_path = Path(target)
@@ -279,8 +280,7 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             manager.install_failure_history.discard(requirement)
 
     try:
-        await async_process_requirements(
-            hass,
+        await manager.async_process_requirements(
             integration.domain,
             integration.requirements,
             integration.is_built_in,
