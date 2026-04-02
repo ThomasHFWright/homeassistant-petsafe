@@ -280,7 +280,7 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             manager.install_failure_history.discard(requirement)
 
     try:
-        await manager.async_process_requirements(
+        await cast(Any, manager.async_process_requirements)(
             integration.domain,
             integration.requirements,
             integration.is_built_in,
