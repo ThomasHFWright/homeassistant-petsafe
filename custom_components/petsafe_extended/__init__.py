@@ -39,7 +39,11 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
     """Return only the platforms needed for the selected devices."""
     platforms: list[Platform] = []
 
-    if _entry_has_selected_devices(entry, "feeders") or _entry_has_selected_devices(entry, "litterboxes"):
+    if (
+        _entry_has_selected_devices(entry, "feeders")
+        or _entry_has_selected_devices(entry, "litterboxes")
+        or _entry_has_selected_devices(entry, "smartdoors")
+    ):
         platforms.append(Platform.SENSOR)
     if _entry_has_selected_devices(entry, "feeders"):
         platforms.append(Platform.SWITCH)

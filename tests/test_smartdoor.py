@@ -9,22 +9,34 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components import petsafe_extended as integration_module
 from custom_components.petsafe_extended.const import (
+    DOMAIN,
     SMARTDOOR_MODE_MANUAL_LOCKED,
     SMARTDOOR_MODE_MANUAL_UNLOCKED,
     SMARTDOOR_MODE_SMART,
 )
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
+from custom_components.petsafe_extended.coordinator.smartdoor_activity import (
+    SMARTDOOR_PET_ACTIVITY_ENTERED,
+    SMARTDOOR_PET_ACTIVITY_EXITED,
+    SMARTDOOR_PET_ACTIVITY_UNKNOWN,
+)
 from custom_components.petsafe_extended.data import (
     PetSafeExtendedCoordinatorData,
     PetSafeExtendedPetLinkData,
     PetSafeExtendedPetProductLink,
     PetSafeExtendedPetProfile,
+    PetSafeExtendedSmartDoorPetState,
 )
 from custom_components.petsafe_extended.diagnostics import async_get_config_entry_diagnostics
 from custom_components.petsafe_extended.lock import async_setup_entry
 from custom_components.petsafe_extended.lock.smartdoor import PetSafeExtendedSmartDoorLock
+from custom_components.petsafe_extended.sensor import async_setup_entry as async_setup_sensor_entry
+from custom_components.petsafe_extended.sensor.smartdoor_pet import PetSafeExtendedSmartDoorPetSensor
+from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 
@@ -68,6 +80,19 @@ def _create_product_stub(api_name: str, product_name: str, product_type: str) ->
         "productName": product_type,
     }
     return product
+
+
+def _create_activity_item(code: str, timestamp: str, *, pet_id: str | None = None) -> dict[str, Any]:
+    """Build a SmartDoor activity payload for tests."""
+    payload: dict[str, Any] = {}
+    if pet_id is not None:
+        payload["petId"] = pet_id
+    return {
+        "code": code,
+        "thingName": "door-1",
+        "timestamp": timestamp,
+        "payload": payload,
+    }
 
 
 @pytest.fixture
@@ -308,6 +333,127 @@ async def test_coordinator_builds_generic_pet_product_links(hass, mock_config_en
 
 
 @pytest.mark.asyncio
+async def test_coordinator_builds_smartdoor_pet_states_from_activity(hass, mock_config_entry) -> None:
+    """SmartDoor activity should derive latest per-pet state from linked pet events."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    door.data["thingName"] = "door-1"
+    door.get_activity = AsyncMock(
+        return_value=[
+            _create_activity_item("CLOUD_MODE_CHANGE_UNLOCKED", "2026-04-02T08:00:00.000Z"),
+            _create_activity_item("PET_ENTERED", "2026-04-02T08:02:00.000Z", pet_id="pet-1"),
+            _create_activity_item("PET_EXITED", "2026-04-02T08:04:00.000Z", pet_id="pet-2"),
+        ]
+    )
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+
+    with (
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pets",
+            AsyncMock(
+                return_value=[
+                    {
+                        "petId": "pet-1",
+                        "profile": {
+                            "name": "Milo",
+                            "petType": "cat",
+                            "gender": "male",
+                            "weight": 4.2,
+                            "unit": "kg",
+                        },
+                        "technologies": [{"technology": "MICROCHIP"}],
+                    },
+                    {
+                        "petId": "pet-2",
+                        "profile": {
+                            "name": "Otis",
+                            "petType": "cat",
+                            "gender": "male",
+                            "weight": 5.0,
+                            "unit": "kg",
+                        },
+                        "technologies": [{"technology": "MICROCHIP"}],
+                    },
+                ]
+            ),
+        ),
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products",
+            AsyncMock(return_value=[{"productId": "door-1", "productType": "SmartDoor"}]),
+        ),
+    ):
+        await coordinator.async_refresh()
+
+    pet_one_state = coordinator.get_smartdoor_pet_state("door-1", "pet-1")
+    pet_two_state = coordinator.get_smartdoor_pet_state("door-1", "pet-2")
+
+    assert pet_one_state is not None
+    assert pet_two_state is not None
+    assert pet_one_state.last_activity == SMARTDOOR_PET_ACTIVITY_ENTERED
+    assert pet_two_state.last_activity == SMARTDOOR_PET_ACTIVITY_EXITED
+    assert coordinator.get_pet_profile("pet-1").name == "Milo"  # type: ignore[union-attr]
+    assert coordinator.data.smartdoor_activity_records["door-1"][-1].pet_id == "pet-2"
+    door.get_activity.assert_awaited_once_with(limit=200)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_smartdoor_activity_uses_since_cursor(hass, mock_config_entry) -> None:
+    """Subsequent SmartDoor activity refreshes should use a watermark cursor."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    initial_activity = [
+        _create_activity_item("PET_ENTERED", "2026-04-02T08:02:00.000Z", pet_id="pet-1"),
+    ]
+    updated_activity = [
+        _create_activity_item("PET_EXITED", "2026-04-02T08:05:00.000Z", pet_id="pet-1"),
+    ]
+    door.get_activity = AsyncMock(side_effect=[initial_activity, updated_activity])
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+
+    with (
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pets",
+            AsyncMock(
+                return_value=[
+                    {
+                        "petId": "pet-1",
+                        "profile": {"name": "Milo", "petType": "cat"},
+                        "technologies": [{"technology": "MICROCHIP"}],
+                    }
+                ]
+            ),
+        ),
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products",
+            AsyncMock(return_value=[{"productId": "door-1", "productType": "SmartDoor"}]),
+        ),
+    ):
+        await coordinator.async_refresh()
+        await coordinator.async_refresh()
+
+    pet_state = coordinator.get_smartdoor_pet_state("door-1", "pet-1")
+
+    assert pet_state is not None
+    assert pet_state.last_activity == SMARTDOOR_PET_ACTIVITY_EXITED
+    assert door.get_activity.await_args_list == [
+        call(limit=200),
+        call(since="2026-04-02T08:02:00.000Z"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_coordinator_pet_links_use_slow_refresh_cache(hass, mock_config_entry) -> None:
     """Pet directory endpoints should not run on every fast coordinator refresh."""
     door = _create_smartdoor(api_name="door-1")
@@ -332,6 +478,81 @@ async def test_coordinator_pet_links_use_slow_refresh_cache(hass, mock_config_en
 
     assert list_pets.await_count == 1
     assert list_pet_products.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entry, attach_runtime_data) -> None:
+    """The sensor platform should create one sensor pair per linked SmartDoor pet."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            links=(
+                PetSafeExtendedPetProductLink("pet-1", "door-1", "smartdoor"),
+                PetSafeExtendedPetProductLink("pet-2", "door-1", "smartdoor"),
+            ),
+            pets_by_id={
+                "pet-1": PetSafeExtendedPetProfile(
+                    pet_id="pet-1",
+                    name="Milo",
+                    pet_type="cat",
+                    gender="male",
+                    weight=4.2,
+                    weight_unit="kg",
+                    technology="MICROCHIP",
+                ),
+                "pet-2": PetSafeExtendedPetProfile(
+                    pet_id="pet-2",
+                    pet_type="cat",
+                ),
+            },
+            product_ids_by_pet_id={
+                "pet-1": ("door-1",),
+                "pet-2": ("door-1",),
+            },
+            pet_ids_by_product_id={"door-1": ("pet-1", "pet-2")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_pet_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetState(
+                    last_seen=None,
+                    last_activity=SMARTDOOR_PET_ACTIVITY_ENTERED,
+                    last_activity_at=None,
+                    last_activity_code="PET_ENTERED",
+                ),
+                "pet-2": PetSafeExtendedSmartDoorPetState(
+                    last_seen=None,
+                    last_activity=SMARTDOOR_PET_ACTIVITY_UNKNOWN,
+                    last_activity_at=None,
+                    last_activity_code=None,
+                ),
+            }
+        },
+    )
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+
+    assert len(added_entities) == 4
+    assert all(isinstance(entity, PetSafeExtendedSmartDoorPetSensor) for entity in added_entities)
+    activity_entities = [entity for entity in added_entities if entity.entity_description.key == "last_activity"]
+    assert sorted(entity.name for entity in activity_entities) == ["Milo Last Activity", "Pet 2 Last Activity"]
+    assert all(entity.device_info is not None for entity in added_entities)
+    assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
+    assert activity_entities[0].extra_state_attributes["technology"] == "MICROCHIP"
+    assert "pet_id" not in activity_entities[0].extra_state_attributes
 
 
 @pytest.mark.asyncio
@@ -376,6 +597,25 @@ async def test_diagnostics_do_not_expose_pet_link_identifiers(
     assert diagnostics["data_summary"]["linked_products"] == 1
     assert "pet-private" not in serialized
     assert "door-private" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_entry_platforms_include_sensor_for_smartdoor_only(mock_config_entry) -> None:
+    """SmartDoor-only entries should now load the sensor platform for pet sensors."""
+    smartdoor_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **mock_config_entry.data,
+            "feeders": [],
+            "litterboxes": [],
+            "smartdoors": ["door-1"],
+        },
+        unique_id=mock_config_entry.unique_id,
+    )
+
+    platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
+
+    assert platforms == [Platform.SENSOR, Platform.LOCK]
 
 
 @pytest.mark.asyncio

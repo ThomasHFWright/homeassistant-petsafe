@@ -11,6 +11,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .feeder import FEEDER_SENSOR_DESCRIPTIONS, PetSafeExtendedFeederSensor
 from .litterbox import LITTERBOX_SENSOR_DESCRIPTIONS, PetSafeExtendedLitterboxSensor
+from .smartdoor_pet import (
+    SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
+    SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
+    PetSafeExtendedSmartDoorPetSensor,
+)
 
 
 async def async_setup_entry(
@@ -25,6 +30,7 @@ async def async_setup_entry(
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
+        smartdoors = filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
     except ConfigEntryAuthFailed:
         raise
     except Exception as err:
@@ -39,6 +45,15 @@ async def async_setup_entry(
         PetSafeExtendedLitterboxSensor(coordinator, litterbox, description)
         for litterbox in litterboxes
         for description in LITTERBOX_SENSOR_DESCRIPTIONS
+    )
+    entities.extend(
+        PetSafeExtendedSmartDoorPetSensor(coordinator, smartdoor, pet_id, description)
+        for smartdoor in smartdoors
+        for pet_id in coordinator.get_smartdoor_pet_ids(smartdoor.api_name)
+        for description in (
+            SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
+            SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
+        )
     )
 
     if entities:

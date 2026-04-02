@@ -55,6 +55,26 @@ class PetSafeExtendedPetProfile:
     technology: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class PetSafeExtendedSmartDoorActivityRecord:
+    """A normalized SmartDoor activity entry."""
+
+    timestamp: datetime
+    code: str
+    activity: str
+    pet_id: str | None = None
+
+
+@dataclass(slots=True)
+class PetSafeExtendedSmartDoorPetState:
+    """Latest SmartDoor activity-derived state for a linked pet."""
+
+    last_seen: datetime | None = None
+    last_activity: str = "unknown"
+    last_activity_at: datetime | None = None
+    last_activity_code: str | None = None
+
+
 @dataclass(slots=True)
 class PetSafeExtendedPetLinkData:
     """Generic pet-to-product linkage shared across product types."""
@@ -92,6 +112,10 @@ class PetSafeExtendedCoordinatorData:
     feeder_details: dict[str, PetSafeExtendedFeederDetails] = field(default_factory=dict)
     litterbox_details: dict[str, PetSafeExtendedLitterboxDetails] = field(default_factory=dict)
     pet_links: PetSafeExtendedPetLinkData = field(default_factory=PetSafeExtendedPetLinkData)
+    smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = field(
+        default_factory=dict
+    )
+    smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

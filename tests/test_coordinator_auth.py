@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -69,6 +70,7 @@ async def test_smartdoor_refresh_auth_failure_raises_reauth(hass, mock_config_en
         (lock_platform, "get_smartdoors"),
         (select_platform, "get_litterboxes"),
         (sensor_platform, "get_feeders"),
+        (sensor_platform, "get_smartdoors"),
         (switch_platform, "get_feeders"),
     ],
 )
@@ -84,8 +86,17 @@ async def test_platform_setup_propagates_auth_failures(
     mock_config_entry.add_to_hass(hass)
     attach_runtime_data(mock_config_entry, coordinator)
 
-    with (
-        patch.object(coordinator, coordinator_method, AsyncMock(side_effect=ConfigEntryAuthFailed)),
-        pytest.raises(ConfigEntryAuthFailed),
-    ):
+    patches = [patch.object(coordinator, coordinator_method, AsyncMock(side_effect=ConfigEntryAuthFailed))]
+    if platform_module is sensor_platform and coordinator_method == "get_smartdoors":
+        patches.extend(
+            [
+                patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+                patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+            ]
+        )
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        stack.enter_context(pytest.raises(ConfigEntryAuthFailed))
         await platform_module.async_setup_entry(hass, mock_config_entry, MagicMock())

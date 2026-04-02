@@ -205,16 +205,18 @@ def _get_device_canonical_id(device: Any) -> str | None:
 
 def _build_pet_profile(pet: Any, pet_id: str) -> PetSafeExtendedPetProfile:
     """Build a sanitized pet profile from a petsafe-api payload."""
-    weight_value = _get_first_numeric(pet, ("weight", "weightValue", "weight_value"))
+    profile = _get_nested_mapping(pet, "profile")
+    technology = _get_first_technology_name(pet)
+    weight_value = _get_first_numeric((profile, pet), ("weight", "weightValue", "weight_value"))
     return PetSafeExtendedPetProfile(
         pet_id=pet_id,
-        name=_get_first_text(pet, ("name", "petName", "friendlyName")),
-        pet_type=_get_first_text(pet, ("petType", "type", "species")),
-        breed=_get_first_text(pet, ("breed",)),
-        gender=_get_first_text(pet, ("gender", "sex")),
+        name=_get_first_text((profile, pet), ("name", "petName", "friendlyName")),
+        pet_type=_get_first_text((profile, pet), ("petType", "type", "species")),
+        breed=_get_first_text((profile, pet), ("breed",)),
+        gender=_get_first_text((profile, pet), ("gender", "sex")),
         weight=weight_value,
-        weight_unit=_get_first_text(pet, ("weightUnit", "weight_unit")),
-        technology=_get_first_text(pet, ("technology", "tagType", "tag_type")),
+        weight_unit=_get_first_text((profile, pet), ("unit", "weightUnit", "weight_unit")),
+        technology=technology,
     )
 
 
@@ -256,7 +258,7 @@ def _append_identifier(candidates: list[str], value: Any) -> None:
 
 def _get_first_text(value: Any, keys: Sequence[str]) -> str | None:
     """Return the first non-empty text field from a payload."""
-    for source in (value, getattr(value, "data", None)):
+    for source in _iter_sources(value):
         if not isinstance(source, Mapping):
             continue
         for key in keys:
@@ -268,7 +270,7 @@ def _get_first_text(value: Any, keys: Sequence[str]) -> str | None:
 
 def _get_first_numeric(value: Any, keys: Sequence[str]) -> float | None:
     """Return the first numeric field from a payload."""
-    for source in (value, getattr(value, "data", None)):
+    for source in _iter_sources(value):
         if not isinstance(source, Mapping):
             continue
         for key in keys:
@@ -276,6 +278,41 @@ def _get_first_numeric(value: Any, keys: Sequence[str]) -> float | None:
             if isinstance(candidate, int | float):
                 return float(candidate)
     return None
+
+
+def _get_nested_mapping(value: Any, key: str) -> Mapping[str, Any] | None:
+    """Return a nested mapping from a payload if it exists."""
+    for source in _iter_sources(value):
+        if not isinstance(source, Mapping):
+            continue
+        nested = source.get(key)
+        if isinstance(nested, Mapping):
+            return nested
+    return None
+
+
+def _get_first_technology_name(value: Any) -> str | None:
+    """Return the first pet technology label from a payload."""
+    for source in _iter_sources(value):
+        if not isinstance(source, Mapping):
+            continue
+        technologies = source.get("technologies")
+        if not isinstance(technologies, Sequence) or isinstance(technologies, (str, bytes, bytearray)):
+            continue
+        for technology in technologies:
+            if not isinstance(technology, Mapping):
+                continue
+            label = technology.get("technology")
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+    return None
+
+
+def _iter_sources(value: Any) -> tuple[Any, ...]:
+    """Yield payload sources that may contain PetSafe fields."""
+    if isinstance(value, tuple):
+        return (*value, *(getattr(item, "data", None) for item in value))
+    return (value, getattr(value, "data", None))
 
 
 def _normalize_product_type(value: str | None) -> str | None:

@@ -25,6 +25,16 @@ from custom_components.petsafe_extended.coordinator.pet_links import (
     async_build_pet_link_data,
     copy_pet_link_data,
 )
+from custom_components.petsafe_extended.coordinator.smartdoor_activity import (
+    SMARTDOOR_ACTIVITY_INITIAL_LIMIT,
+    apply_activity_records,
+    copy_smartdoor_activity_records,
+    copy_smartdoor_pet_states,
+    extract_cursor,
+    merge_activity_records,
+    parse_smartdoor_activity_records,
+    seed_pet_states,
+)
 from custom_components.petsafe_extended.data import (
     PetSafeExtendedConfigEntry,
     PetSafeExtendedCoordinatorData,
@@ -32,6 +42,8 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedLitterboxDetails,
     PetSafeExtendedPetLinkData,
     PetSafeExtendedPetProfile,
+    PetSafeExtendedSmartDoorActivityRecord,
+    PetSafeExtendedSmartDoorPetState,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -65,6 +77,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._litterbox_details: dict[str, PetSafeExtendedLitterboxDetails] = {}
         self._pet_links: PetSafeExtendedPetLinkData | None = None
         self._pet_links_last_refresh_monotonic: float | None = None
+        self._smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
+        self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
+        self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
         self._device_lock = asyncio.Lock()
 
     @staticmethod
@@ -88,6 +103,10 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             feeder_details=dict(self._feeder_details or current.feeder_details),
             litterbox_details=dict(self._litterbox_details or current.litterbox_details),
             pet_links=copy_pet_link_data(pet_links),
+            smartdoor_activity_records=copy_smartdoor_activity_records(
+                self._smartdoor_activity_records or current.smartdoor_activity_records
+            ),
+            smartdoor_pet_states=copy_smartdoor_pet_states(self._smartdoor_pet_states or current.smartdoor_pet_states),
         )
 
     def _find_cached_feeder(self, api_name: str) -> Any | None:
@@ -115,6 +134,22 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         if self.data is not None:
             return self.data.pet_links
         return None
+
+    def _current_smartdoor_activity_records(self) -> dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]]:
+        """Return cached SmartDoor activity records."""
+        if self._smartdoor_activity_records:
+            return self._smartdoor_activity_records
+        if self.data is not None:
+            return self.data.smartdoor_activity_records
+        return {}
+
+    def _current_smartdoor_pet_states(self) -> dict[str, dict[str, PetSafeExtendedSmartDoorPetState]]:
+        """Return cached SmartDoor pet states."""
+        if self._smartdoor_pet_states:
+            return self._smartdoor_pet_states
+        if self.data is not None:
+            return self.data.smartdoor_pet_states
+        return {}
 
     async def get_feeders(self) -> list[Any]:
         """Return the list of feeders."""
@@ -185,6 +220,23 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     def get_smartdoor_pet_ids(self, api_name: str) -> tuple[str, ...]:
         """Return pet identifiers linked to a SmartDoor."""
         return self.get_pet_ids_for_product(api_name)
+
+    def get_smartdoor_pet_state(self, api_name: str, pet_id: str) -> PetSafeExtendedSmartDoorPetState | None:
+        """Return the latest SmartDoor pet state for a linked pet."""
+        return self._current_smartdoor_pet_states().get(api_name, {}).get(pet_id)
+
+    def get_pet_display_name(self, api_name: str, pet_id: str) -> str:
+        """Return a user-facing pet name without exposing raw identifiers."""
+        profile = self.get_pet_profile(pet_id)
+        if profile is not None and profile.name:
+            return profile.name
+
+        linked_pet_ids = self.get_smartdoor_pet_ids(api_name)
+        try:
+            pet_index = linked_pet_ids.index(pet_id) + 1
+        except ValueError:
+            pet_index = 1
+        return f"Pet {pet_index}"
 
     async def async_feed_feeder(
         self,
@@ -493,12 +545,18 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 feeder_details = await self._async_build_feeder_details(feeders)
                 litterbox_details = await self._async_build_litterbox_details(litterboxes)
                 pet_links = await self._async_build_pet_links(feeders, litterboxes, smartdoors)
+                smartdoor_activity_records, smartdoor_pet_states = await self._async_build_smartdoor_pet_states(
+                    smartdoors,
+                    pet_links,
+                )
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
                 self._feeder_details = feeder_details
                 self._litterbox_details = litterbox_details
                 self._pet_links = pet_links
+                self._smartdoor_activity_records = smartdoor_activity_records
+                self._smartdoor_pet_states = smartdoor_pet_states
                 return PetSafeExtendedCoordinatorData(
                     feeders=list(feeders),
                     litterboxes=list(litterboxes),
@@ -506,6 +564,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     feeder_details=dict(feeder_details),
                     litterbox_details=dict(litterbox_details),
                     pet_links=copy_pet_link_data(pet_links),
+                    smartdoor_activity_records=copy_smartdoor_activity_records(smartdoor_activity_records),
+                    smartdoor_pet_states=copy_smartdoor_pet_states(smartdoor_pet_states),
                 )
         except httpx.HTTPStatusError as err:
             if self._is_auth_error(err):
@@ -550,6 +610,71 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
         self._pet_links_last_refresh_monotonic = now_monotonic
         return pet_links
+
+    async def _async_build_smartdoor_pet_states(
+        self,
+        smartdoors: list[Any],
+        pet_links: PetSafeExtendedPetLinkData,
+    ) -> tuple[
+        dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]],
+        dict[str, dict[str, PetSafeExtendedSmartDoorPetState]],
+    ]:
+        """Build SmartDoor activity caches used by pet sensor entities."""
+        previous_records = copy_smartdoor_activity_records(self._current_smartdoor_activity_records())
+        previous_states = copy_smartdoor_pet_states(self._current_smartdoor_pet_states())
+        activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
+        pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+
+        for door in smartdoors:
+            door_api_name = cast(str, door.api_name)
+            linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ())))
+            if not linked_pet_ids:
+                activity_records[door_api_name] = ()
+                pet_states[door_api_name] = {}
+                self._smartdoor_activity_cursor_by_door.pop(door_api_name, None)
+                continue
+
+            door_previous_states = previous_states.get(door_api_name, {})
+            current_states = seed_pet_states(linked_pet_ids)
+            for pet_id, previous_state in door_previous_states.items():
+                if pet_id in current_states:
+                    current_states[pet_id] = previous_state
+
+            activity_items: list[dict[str, Any]] = []
+            try:
+                since = self._smartdoor_activity_cursor_by_door.get(door_api_name)
+                if since is None:
+                    activity_items = await door.get_activity(limit=SMARTDOOR_ACTIVITY_INITIAL_LIMIT)
+                else:
+                    activity_items = await door.get_activity(since=since)
+            except httpx.HTTPStatusError as err:
+                if self._is_auth_error(err):
+                    self._raise_auth_failed(err)
+                LOGGER.debug("Failed to refresh SmartDoor activity for %s: %s", door_api_name, err)
+                activity_records[door_api_name] = previous_records.get(door_api_name, ())
+                pet_states[door_api_name] = current_states
+                continue
+            except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+                LOGGER.debug("Failed to refresh SmartDoor activity for %s: %s", door_api_name, err)
+                activity_records[door_api_name] = previous_records.get(door_api_name, ())
+                pet_states[door_api_name] = current_states
+                continue
+
+            parsed_records = parse_smartdoor_activity_records(activity_items, linked_pet_ids)
+            activity_records[door_api_name] = merge_activity_records(
+                previous_records.get(door_api_name, ()), parsed_records
+            )
+            pet_states[door_api_name] = apply_activity_records(
+                linked_pet_ids,
+                current_states,
+                activity_records[door_api_name],
+            )
+
+            cursor = extract_cursor(activity_items, self._smartdoor_activity_cursor_by_door.get(door_api_name))
+            if cursor is not None:
+                self._smartdoor_activity_cursor_by_door[door_api_name] = cursor
+
+        return activity_records, pet_states
 
     async def _async_build_feeder_details(self, feeders: list[Any]) -> dict[str, PetSafeExtendedFeederDetails]:
         """Build supplemental feeder state."""
