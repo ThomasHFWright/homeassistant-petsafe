@@ -119,6 +119,34 @@ When a task completes and the developer moves to a new topic, suggest committing
 
 See `.github/copilot-instructions.md` for commit message examples and context monitoring guidance.
 
+### Privacy and Redaction
+
+Treat real user data and runtime secrets as private by default.
+
+**Never include in commits, code comments, PR bodies, PR comments, release notes, docs, tests, or final summaries:**
+
+- Personal email addresses when they would reveal runtime account linkage
+- One-time login or verification codes, PINs, or passwords
+- Device IDs, serial numbers, MAC addresses, account IDs, or other stable identifiers
+- Access tokens, refresh tokens, API keys, cookies, or session values
+
+**Allowed exception:**
+
+- Normal git author or committer metadata, or GitHub attribution fields such as "updated by", may use the developer's chosen email address
+- That exception does not allow copying the same email into validation notes, tests, logs, PR text, or other project content that would show which PetSafe account was used
+
+**When describing validation or debugging work publicly:**
+
+- Use generic wording such as "a real account", "a fresh verification code", or "a discovered smart door"
+- Do not quote exact identifiers even if they appeared in logs or were provided during testing
+- Prefer redacted forms only when a concrete reference is unavoidable, for example `<redacted_email>`
+
+**Local handling rules:**
+
+- Keep sensitive values in untracked local runtime state only when needed for testing
+- Do not copy sensitive values from local config or logs into tracked files
+- If you notice a leak in editable GitHub text you control, redact it immediately
+
 ## Custom Integration Flexibility
 
 **This is a CUSTOM integration, not a Home Assistant Core integration.** While we follow Core patterns for quality and maintainability, we have more flexibility in implementation decisions:
