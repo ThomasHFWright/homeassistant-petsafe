@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from custom_components.petsafe_extended.coordinator.smartdoor_activity import normalize_activity_subtype
 from custom_components.petsafe_extended.data import PetSafeExtendedSmartDoorActivityRecord
 from custom_components.petsafe_extended.entity import PetSafeExtendedEntity
 from custom_components.petsafe_extended.lock.smartdoor import SMARTDOOR_MODEL
@@ -70,6 +71,8 @@ class PetSafeExtendedSmartDoorActivityEntity(PetSafeExtendedEntity):
             "occurred_at": record.timestamp.isoformat(),
             "raw_code": record.code,
         }
+        if event_subtype := normalize_activity_subtype(record.code, record.event_type):
+            attributes["event_subtype"] = event_subtype
         if record.pet_id is not None:
             attributes["pet_name"] = self.coordinator.get_pet_display_name(self._api_name, record.pet_id)
         return attributes

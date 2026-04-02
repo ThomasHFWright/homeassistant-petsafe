@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import re
 from typing import Any
 
 from custom_components.petsafe_extended.data import (
@@ -258,6 +259,14 @@ def _normalize_activity_event(code: str, pet_id: str | None) -> tuple[str, str]:
     if any(marker in normalized for marker in ("ERROR", "FAULT", "JAM", "BLOCK", "STUCK")):
         return SMARTDOOR_EVENT_TYPE_DOOR_ERROR, SMARTDOOR_PET_ACTIVITY_UNKNOWN
     return SMARTDOOR_EVENT_TYPE_OTHER, SMARTDOOR_PET_ACTIVITY_UNKNOWN
+
+
+def normalize_activity_subtype(code: str, event_type: str) -> str | None:
+    """Return a translatable subtype key derived from the raw vendor code."""
+    normalized = re.sub(r"[^a-z0-9]+", "_", code.strip().lower()).strip("_")
+    if not normalized or normalized == event_type:
+        return None
+    return normalized
 
 
 def _get_nested_mapping(value: Mapping[str, Any] | None, key: str) -> Mapping[str, Any] | None:

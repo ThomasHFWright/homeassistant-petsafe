@@ -726,6 +726,7 @@ async def test_event_platform_adds_smartdoor_activity_entities(hass, mock_config
     assert all(entity.device_info is not None for entity in added_entities)
     assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
     assert all(entity.event_types == SMARTDOOR_ACTIVITY_EVENT_TYPES for entity in added_entities)
+    assert all(entity.translation_key == "activity" for entity in added_entities)
 
 
 @pytest.mark.asyncio
@@ -770,6 +771,10 @@ async def test_smartdoor_event_entities_filter_records_by_pet(coordinator) -> No
     )
 
     door_entity._async_handle_activity(mode_change_record)  # noqa: SLF001
+    assert door_entity.state is not None
+    assert door_entity.state_attributes["event_type"] == SMARTDOOR_EVENT_TYPE_MODE_CHANGED
+    assert door_entity.state_attributes["raw_code"] == "USER_MODE_CHANGE_SMART"
+    assert door_entity.state_attributes["event_subtype"] == "user_mode_change_smart"
     door_entity._async_handle_activity(pet_exit_record)  # noqa: SLF001
     pet_entity._async_handle_activity(mode_change_record)  # noqa: SLF001
     pet_entity._async_handle_activity(pet_exit_record)  # noqa: SLF001
@@ -779,6 +784,7 @@ async def test_smartdoor_event_entities_filter_records_by_pet(coordinator) -> No
     assert door_entity.state_attributes["event_type"] == SMARTDOOR_EVENT_TYPE_PET_EXITED
     assert door_entity.state_attributes["raw_code"] == "PET_EXITED"
     assert door_entity.state_attributes["pet_name"] == "Milo"
+    assert "event_subtype" not in door_entity.state_attributes
     assert pet_entity.state is not None
     assert pet_entity.state_attributes["event_type"] == SMARTDOOR_EVENT_TYPE_PET_EXITED
     assert pet_entity.state_attributes["raw_code"] == "PET_EXITED"

@@ -13,6 +13,7 @@ from homeassistant.core import callback
 SMARTDOOR_ACTIVITY_EVENT_DESCRIPTION = EventEntityDescription(
     key="activity",
     name="Activity",
+    translation_key="activity",
     event_types=SMARTDOOR_ACTIVITY_EVENT_TYPES,
 )
 
