@@ -24,6 +24,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.BUTTON,
     Platform.SELECT,
+    Platform.EVENT,
     Platform.LOCK,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -51,6 +52,8 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         platforms.append(Platform.BUTTON)
     if _entry_has_selected_devices(entry, "litterboxes"):
         platforms.append(Platform.SELECT)
+    if _entry_has_selected_devices(entry, "smartdoors"):
+        platforms.append(Platform.EVENT)
     if _entry_has_selected_devices(entry, "smartdoors"):
         platforms.append(Platform.LOCK)
 

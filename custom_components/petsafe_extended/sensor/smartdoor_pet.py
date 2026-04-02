@@ -15,12 +15,14 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 SMARTDOOR_PET_LAST_SEEN_DESCRIPTION = SensorEntityDescription(
     key="last_seen",
     name="Last Seen",
+    translation_key="last_seen",
     device_class=SensorDeviceClass.TIMESTAMP,
 )
 
 SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION = SensorEntityDescription(
     key="last_activity",
     name="Last Activity",
+    translation_key="last_activity",
     device_class=SensorDeviceClass.ENUM,
     options=SMARTDOOR_PET_ACTIVITY_OPTIONS,
 )

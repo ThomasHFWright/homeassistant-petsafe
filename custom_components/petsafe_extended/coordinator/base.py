@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 import time
 from typing import TYPE_CHECKING, Any, cast
@@ -31,6 +32,7 @@ from custom_components.petsafe_extended.coordinator.smartdoor_activity import (
     copy_smartdoor_activity_records,
     copy_smartdoor_pet_states,
     extract_cursor,
+    get_new_activity_records,
     merge_activity_records,
     parse_smartdoor_activity_records,
     seed_pet_states,
@@ -46,6 +48,7 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorPetState,
 )
 from custom_components.petsafe_extended.utils.smartdoor import smartdoor_modes_match
+from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -81,6 +84,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
         self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+        self._smartdoor_activity_listeners: dict[
+            str, list[Callable[[PetSafeExtendedSmartDoorActivityRecord], None]]
+        ] = {}
         self._device_lock = asyncio.Lock()
 
     @staticmethod
@@ -225,6 +231,28 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     def get_smartdoor_pet_state(self, api_name: str, pet_id: str) -> PetSafeExtendedSmartDoorPetState | None:
         """Return the latest SmartDoor pet state for a linked pet."""
         return self._current_smartdoor_pet_states().get(api_name, {}).get(pet_id)
+
+    @callback
+    def async_subscribe_smartdoor_activity(
+        self,
+        api_name: str,
+        update_listener: Callable[[PetSafeExtendedSmartDoorActivityRecord], None],
+    ) -> Callable[[], None]:
+        """Subscribe to new SmartDoor activity records for a specific door."""
+        listeners = self._smartdoor_activity_listeners.setdefault(api_name, [])
+        listeners.append(update_listener)
+
+        @callback
+        def unsubscribe() -> None:
+            current_listeners = self._smartdoor_activity_listeners.get(api_name)
+            if not current_listeners:
+                return
+            if update_listener in current_listeners:
+                current_listeners.remove(update_listener)
+            if not current_listeners:
+                self._smartdoor_activity_listeners.pop(api_name, None)
+
+        return unsubscribe
 
     def get_pet_display_name(self, api_name: str, pet_id: str) -> str:
         """Return a user-facing pet name without exposing raw identifiers."""
@@ -546,10 +574,11 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 feeder_details = await self._async_build_feeder_details(feeders)
                 litterbox_details = await self._async_build_litterbox_details(litterboxes)
                 pet_links = await self._async_build_pet_links(feeders, litterboxes, smartdoors)
-                smartdoor_activity_records, smartdoor_pet_states = await self._async_build_smartdoor_pet_states(
-                    smartdoors,
-                    pet_links,
-                )
+                (
+                    smartdoor_activity_records,
+                    smartdoor_pet_states,
+                    dispatch_records_by_door,
+                ) = await self._async_build_smartdoor_pet_states(smartdoors, pet_links)
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
@@ -558,7 +587,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._pet_links = pet_links
                 self._smartdoor_activity_records = smartdoor_activity_records
                 self._smartdoor_pet_states = smartdoor_pet_states
-                return PetSafeExtendedCoordinatorData(
+                data = PetSafeExtendedCoordinatorData(
                     feeders=list(feeders),
                     litterboxes=list(litterboxes),
                     smartdoors=list(smartdoors),
@@ -574,6 +603,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             raise UpdateFailed("Failed to refresh PetSafe devices") from err
         except Exception as err:
             raise UpdateFailed("Failed to refresh PetSafe devices") from err
+        else:
+            self._async_dispatch_smartdoor_activity(dispatch_records_by_door)
+            return data
 
     async def _async_build_pet_links(
         self,
@@ -619,21 +651,18 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     ) -> tuple[
         dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]],
         dict[str, dict[str, PetSafeExtendedSmartDoorPetState]],
+        dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]],
     ]:
         """Build SmartDoor activity caches used by pet sensor entities."""
         previous_records = copy_smartdoor_activity_records(self._current_smartdoor_activity_records())
         previous_states = copy_smartdoor_pet_states(self._current_smartdoor_pet_states())
         activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
         pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+        dispatch_records_by_door: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
 
         for door in smartdoors:
             door_api_name = cast(str, door.api_name)
             linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ())))
-            if not linked_pet_ids:
-                activity_records[door_api_name] = ()
-                pet_states[door_api_name] = {}
-                self._smartdoor_activity_cursor_by_door.pop(door_api_name, None)
-                continue
 
             door_previous_states = previous_states.get(door_api_name, {})
             current_states = seed_pet_states(linked_pet_ids)
@@ -654,28 +683,56 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 LOGGER.debug("Failed to refresh SmartDoor activity for %s: %s", door_api_name, err)
                 activity_records[door_api_name] = previous_records.get(door_api_name, ())
                 pet_states[door_api_name] = current_states
+                dispatch_records_by_door[door_api_name] = ()
                 continue
             except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
                 LOGGER.debug("Failed to refresh SmartDoor activity for %s: %s", door_api_name, err)
                 activity_records[door_api_name] = previous_records.get(door_api_name, ())
                 pet_states[door_api_name] = current_states
+                dispatch_records_by_door[door_api_name] = ()
                 continue
 
             parsed_records = parse_smartdoor_activity_records(activity_items, linked_pet_ids)
-            activity_records[door_api_name] = merge_activity_records(
-                previous_records.get(door_api_name, ()), parsed_records
-            )
+            previous_door_records = previous_records.get(door_api_name, ())
+            activity_records[door_api_name] = merge_activity_records(previous_door_records, parsed_records)
             pet_states[door_api_name] = apply_activity_records(
                 linked_pet_ids,
                 current_states,
                 activity_records[door_api_name],
             )
+            if since is None:
+                dispatch_records_by_door[door_api_name] = ()
+            else:
+                dispatch_records_by_door[door_api_name] = tuple(
+                    get_new_activity_records(previous_door_records, parsed_records)
+                )
 
             cursor = extract_cursor(activity_items, self._smartdoor_activity_cursor_by_door.get(door_api_name))
             if cursor is not None:
                 self._smartdoor_activity_cursor_by_door[door_api_name] = cursor
 
-        return activity_records, pet_states
+        current_door_ids = {cast(str, door.api_name) for door in smartdoors}
+        for api_name in tuple(self._smartdoor_activity_cursor_by_door):
+            if api_name not in current_door_ids:
+                self._smartdoor_activity_cursor_by_door.pop(api_name, None)
+
+        return activity_records, pet_states, dispatch_records_by_door
+
+    @callback
+    def _async_dispatch_smartdoor_activity(
+        self,
+        records_by_door: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]],
+    ) -> None:
+        """Dispatch new SmartDoor activity records to subscribed listeners."""
+        for api_name, records in records_by_door.items():
+            if not records:
+                continue
+            listeners = tuple(self._smartdoor_activity_listeners.get(api_name, ()))
+            if not listeners:
+                continue
+            for record in records:
+                for listener in listeners:
+                    listener(record)
 
     async def _async_build_feeder_details(self, feeders: list[Any]) -> dict[str, PetSafeExtendedFeederDetails]:
         """Build supplemental feeder state."""

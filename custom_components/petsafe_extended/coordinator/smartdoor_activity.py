@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import re
 from typing import Any
 
 from custom_components.petsafe_extended.data import (
@@ -24,6 +25,24 @@ SMARTDOOR_PET_ACTIVITY_OPTIONS = [
     SMARTDOOR_PET_ACTIVITY_ENTERED,
     SMARTDOOR_PET_ACTIVITY_EXITED,
     SMARTDOOR_PET_ACTIVITY_ACTIVITY,
+]
+
+SMARTDOOR_EVENT_TYPE_PET_ENTERED = "pet_entered"
+SMARTDOOR_EVENT_TYPE_PET_EXITED = "pet_exited"
+SMARTDOOR_EVENT_TYPE_PET_ACTIVITY = "pet_activity"
+SMARTDOOR_EVENT_TYPE_SCHEDULE_STARTED = "schedule_started"
+SMARTDOOR_EVENT_TYPE_MODE_CHANGED = "mode_changed"
+SMARTDOOR_EVENT_TYPE_DOOR_ERROR = "door_error"
+SMARTDOOR_EVENT_TYPE_OTHER = "other"
+
+SMARTDOOR_ACTIVITY_EVENT_TYPES = [
+    SMARTDOOR_EVENT_TYPE_PET_ENTERED,
+    SMARTDOOR_EVENT_TYPE_PET_EXITED,
+    SMARTDOOR_EVENT_TYPE_PET_ACTIVITY,
+    SMARTDOOR_EVENT_TYPE_SCHEDULE_STARTED,
+    SMARTDOOR_EVENT_TYPE_MODE_CHANGED,
+    SMARTDOOR_EVENT_TYPE_DOOR_ERROR,
+    SMARTDOOR_EVENT_TYPE_OTHER,
 ]
 
 _PET_ID_KEYS = ("petId", "petID", "pet_id")
@@ -83,6 +102,25 @@ def merge_activity_records(
     )
 
 
+def get_new_activity_records(
+    previous: tuple[PetSafeExtendedSmartDoorActivityRecord, ...],
+    new: Sequence[PetSafeExtendedSmartDoorActivityRecord],
+) -> list[PetSafeExtendedSmartDoorActivityRecord]:
+    """Return only activity records that have not already been observed."""
+    previous_keys = {_record_key(record) for record in previous}
+    emitted_keys: set[tuple[str, str, str | None]] = set()
+    fresh_records: list[PetSafeExtendedSmartDoorActivityRecord] = []
+
+    for record in sorted(new, key=lambda item: item.timestamp):
+        record_key = _record_key(record)
+        if record_key in previous_keys or record_key in emitted_keys:
+            continue
+        emitted_keys.add(record_key)
+        fresh_records.append(record)
+
+    return fresh_records
+
+
 def apply_activity_records(
     linked_pet_ids: tuple[str, ...],
     previous_states: dict[str, PetSafeExtendedSmartDoorPetState],
@@ -120,7 +158,9 @@ def extract_cursor(activity_items: Sequence[dict[str, Any]], previous_cursor: st
     if previous_cursor is not None:
         timestamps.append(previous_cursor)
     if not timestamps:
-        return previous_cursor
+        if previous_cursor is not None:
+            return previous_cursor
+        return dt_util.utcnow().isoformat()
     return max(timestamps)
 
 
@@ -146,14 +186,13 @@ def parse_smartdoor_activity_records(
         if pet_id is not None and linked_pet_id_set and pet_id not in linked_pet_id_set:
             continue
 
-        activity = _normalize_activity(code, pet_id)
-        if pet_id is None and activity == SMARTDOOR_PET_ACTIVITY_UNKNOWN:
-            continue
+        event_type, activity = _normalize_activity_event(code, pet_id)
 
         records.append(
             PetSafeExtendedSmartDoorActivityRecord(
                 timestamp=timestamp,
                 code=code,
+                event_type=event_type,
                 activity=activity,
                 pet_id=pet_id,
             )
@@ -200,14 +239,34 @@ def _extract_pet_id(item: Mapping[str, Any]) -> str | None:
 
 def _normalize_activity(code: str, pet_id: str | None) -> str:
     """Normalize a raw PetSafe activity code into a stable pet-facing enum value."""
+    return _normalize_activity_event(code, pet_id)[1]
+
+
+def _normalize_activity_event(code: str, pet_id: str | None) -> tuple[str, str]:
+    """Normalize a raw PetSafe activity code into event and pet-state values."""
     normalized = code.strip().upper()
-    if pet_id is None:
-        return SMARTDOOR_PET_ACTIVITY_UNKNOWN
-    if "ENTER" in normalized or "INBOUND" in normalized:
-        return SMARTDOOR_PET_ACTIVITY_ENTERED
-    if "EXIT" in normalized or "OUTBOUND" in normalized or "LEAVE" in normalized:
-        return SMARTDOOR_PET_ACTIVITY_EXITED
-    return SMARTDOOR_PET_ACTIVITY_ACTIVITY
+    if pet_id is not None:
+        if "ENTER" in normalized or "INBOUND" in normalized:
+            return SMARTDOOR_EVENT_TYPE_PET_ENTERED, SMARTDOOR_PET_ACTIVITY_ENTERED
+        if "EXIT" in normalized or "OUTBOUND" in normalized or "LEAVE" in normalized:
+            return SMARTDOOR_EVENT_TYPE_PET_EXITED, SMARTDOOR_PET_ACTIVITY_EXITED
+        return SMARTDOOR_EVENT_TYPE_PET_ACTIVITY, SMARTDOOR_PET_ACTIVITY_ACTIVITY
+
+    if "MODE_CHANGE" in normalized:
+        return SMARTDOOR_EVENT_TYPE_MODE_CHANGED, SMARTDOOR_PET_ACTIVITY_UNKNOWN
+    if "SCHEDULE" in normalized and any(marker in normalized for marker in ("START", "BEGIN", "RUN")):
+        return SMARTDOOR_EVENT_TYPE_SCHEDULE_STARTED, SMARTDOOR_PET_ACTIVITY_UNKNOWN
+    if any(marker in normalized for marker in ("ERROR", "FAULT", "JAM", "BLOCK", "STUCK")):
+        return SMARTDOOR_EVENT_TYPE_DOOR_ERROR, SMARTDOOR_PET_ACTIVITY_UNKNOWN
+    return SMARTDOOR_EVENT_TYPE_OTHER, SMARTDOOR_PET_ACTIVITY_UNKNOWN
+
+
+def normalize_activity_subtype(code: str, event_type: str) -> str | None:
+    """Return a translatable subtype key derived from the raw vendor code."""
+    normalized = re.sub(r"[^a-z0-9]+", "_", code.strip().lower()).strip("_")
+    if not normalized or normalized == event_type:
+        return None
+    return normalized
 
 
 def _get_nested_mapping(value: Mapping[str, Any] | None, key: str) -> Mapping[str, Any] | None:
@@ -216,3 +275,8 @@ def _get_nested_mapping(value: Mapping[str, Any] | None, key: str) -> Mapping[st
         return None
     nested = value.get(key)
     return nested if isinstance(nested, Mapping) else None
+
+
+def _record_key(record: PetSafeExtendedSmartDoorActivityRecord) -> tuple[str, str, str | None]:
+    """Return the dedupe key for a normalized SmartDoor activity record."""
+    return record.timestamp.isoformat(), record.code, record.pet_id

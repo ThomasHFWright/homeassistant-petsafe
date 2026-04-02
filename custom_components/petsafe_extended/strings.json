@@ -36,5 +36,51 @@
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
+  },
+  "entity": {
+    "event": {
+      "activity": {
+        "name": "Activity",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "pet_entered": "Pet entered",
+              "pet_exited": "Pet exited",
+              "pet_activity": "Pet activity",
+              "schedule_started": "Schedule started",
+              "mode_changed": "Mode changed",
+              "door_error": "Door error",
+              "other": "Other activity"
+            }
+          },
+          "event_subtype": {
+            "state": {
+              "pet_entered": "Pet entered",
+              "pet_exited": "Pet exited",
+              "cloud_mode_change_locked": "Locked remotely",
+              "cloud_mode_change_unlocked": "Unlocked remotely",
+              "cloud_mode_change_smart": "Smart mode enabled remotely",
+              "user_mode_change_locked": "Locked manually",
+              "user_mode_change_unlocked": "Unlocked manually",
+              "user_mode_change_smart": "Smart mode enabled manually"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "last_seen": {
+        "name": "Last Seen"
+      },
+      "last_activity": {
+        "name": "Last Activity",
+        "state": {
+          "unknown": "Unknown",
+          "entered": "Entered",
+          "exited": "Exited",
+          "activity": "Activity detected"
+        }
+      }
+    }
   }
 }

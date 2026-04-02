@@ -61,6 +61,7 @@ class PetSafeExtendedSmartDoorActivityRecord:
 
     timestamp: datetime
     code: str
+    event_type: str
     activity: str
     pet_id: str | None = None
 
