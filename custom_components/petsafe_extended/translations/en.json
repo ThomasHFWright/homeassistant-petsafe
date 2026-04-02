@@ -67,6 +67,20 @@
                     }
                 }
             }
+        },
+        "sensor": {
+            "last_seen": {
+                "name": "Last Seen"
+            },
+            "last_activity": {
+                "name": "Last Activity",
+                "state": {
+                    "unknown": "Unknown",
+                    "entered": "Entered",
+                    "exited": "Exited",
+                    "activity": "Activity detected"
+                }
+            }
         }
     }
 }

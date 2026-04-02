@@ -685,6 +685,7 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
     assert sorted(entity.name for entity in activity_entities) == ["Milo Last Activity", "Pet 2 Last Activity"]
     assert all(entity.device_info is not None for entity in added_entities)
     assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
+    assert all(entity.translation_key == "last_activity" for entity in activity_entities)
     assert activity_entities[0].extra_state_attributes["technology"] == "MICROCHIP"
     assert "pet_id" not in activity_entities[0].extra_state_attributes
 
