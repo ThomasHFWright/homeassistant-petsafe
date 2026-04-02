@@ -52,15 +52,15 @@ def _load_optional_petsafe_const(name: str, default: str) -> str:
 
 SMARTDOOR_MODE_MANUAL_LOCKED: Final = _load_optional_petsafe_const(
     "SMARTDOOR_MODE_MANUAL_LOCKED",
-    "manual_locked",
+    "MANUAL_LOCKED",
 )
 SMARTDOOR_MODE_MANUAL_UNLOCKED: Final = _load_optional_petsafe_const(
     "SMARTDOOR_MODE_MANUAL_UNLOCKED",
-    "manual_unlocked",
+    "MANUAL_UNLOCKED",
 )
 SMARTDOOR_MODE_SMART: Final = _load_optional_petsafe_const(
     "SMARTDOOR_MODE_SMART",
-    "smart",
+    "SMART",
 )
 SMARTDOOR_FINAL_ACT_LOCKED: Final = _load_optional_petsafe_const(
     "SMARTDOOR_FINAL_ACT_LOCKED",

@@ -152,6 +152,13 @@ def coordinator(hass, mock_config_entry, attach_runtime_data):
     return coordinator
 
 
+def test_smartdoor_mode_constants_match_api_contract() -> None:
+    """SmartDoor mode constants should match the PetSafe API payload values."""
+    assert SMARTDOOR_MODE_MANUAL_LOCKED == "MANUAL_LOCKED"
+    assert SMARTDOOR_MODE_MANUAL_UNLOCKED == "MANUAL_UNLOCKED"
+    assert SMARTDOOR_MODE_SMART == "SMART"
+
+
 @pytest.mark.asyncio
 async def test_lock_entity_state_and_controls(coordinator) -> None:
     """Validate SmartDoor lock entity properties and control actions."""

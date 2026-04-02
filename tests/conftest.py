@@ -29,9 +29,11 @@ if "petsafe" not in sys.modules:
     class _InvalidCodeException(Exception):
         """Stub invalid-code exception."""
 
-    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_LOCKED", "manual_locked")
-    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_UNLOCKED", "manual_unlocked")
-    setattr(petsafe_const, "SMARTDOOR_MODE_SMART", "smart")
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_LOCKED", "MANUAL_LOCKED")
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_UNLOCKED", "MANUAL_UNLOCKED")
+    setattr(petsafe_const, "SMARTDOOR_MODE_SMART", "SMART")
+    setattr(petsafe_const, "SMARTDOOR_FINAL_ACT_LOCKED", "LOCKED")
+    setattr(petsafe_const, "SMARTDOOR_FINAL_ACT_UNLOCKED", "UNLOCKED")
     setattr(petsafe_module, "const", petsafe_const)
     setattr(petsafe_client, "InvalidUserException", _InvalidUserException)
     setattr(petsafe_client, "InvalidCodeException", _InvalidCodeException)
