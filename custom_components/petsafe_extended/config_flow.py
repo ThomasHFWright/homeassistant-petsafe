@@ -1,4 +1,4 @@
-"""Config flow for PetSafe Integration."""
+"""Config flow for PetSafe Extended."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ from functools import partial
 import logging
 from typing import Any
 
-from botocore.exceptions import ParamValidationError
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_BASE, CONF_CODE, CONF_EMAIL, CONF_TOKEN
-from homeassistant.data_entry_flow import FlowResult
-import homeassistant.helpers.config_validation as cv
 from homeassistant.requirements import RequirementsNotFound
 
 from . import _async_import_petsafe
@@ -25,12 +24,12 @@ STEP_CODE_DATA_SCHEMA = vol.Schema({vol.Required(CONF_CODE): str})
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for PetSafe Integration."""
+    """Handle a config flow for PetSafe Extended."""
 
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize the PetSafe config flow state."""
+        """Initialize the config flow state."""
         self.data: dict[str, Any] = {}
         self._petsafe: Any | None = None
         self._client: Any | None = None
@@ -48,11 +47,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self._petsafe
 
-    async def async_step_reauth(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_reauth(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle reauthentication by restarting the user step."""
         return await self.async_step_user()
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the email entry step."""
         errors: dict[str, str] = {}
 
@@ -61,13 +60,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             petsafe = await self._async_get_petsafe()
-        except ModuleNotFoundError, RequirementsNotFound:
+        except (ModuleNotFoundError, RequirementsNotFound):
             _LOGGER.exception("Unable to load the petsafe dependency during the user step")
             errors[CONF_BASE] = "cannot_connect"
             return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
         try:
-            await self.get_email_code(petsafe, user_input[CONF_EMAIL])
+            await self._async_request_email_code(petsafe, user_input[CONF_EMAIL])
             self.data = user_input
             return await self.async_step_code()
         except petsafe.client.InvalidUserException:
@@ -77,7 +76,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
-    async def async_step_code(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_code(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the confirmation code step."""
         errors: dict[str, str] = {}
 
@@ -86,13 +85,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             petsafe = await self._async_get_petsafe()
-        except ModuleNotFoundError, RequirementsNotFound:
+        except (ModuleNotFoundError, RequirementsNotFound):
             _LOGGER.exception("Unable to load the petsafe dependency during the code step")
             errors[CONF_BASE] = "cannot_connect"
             return self.async_show_form(step_id="code", data_schema=STEP_CODE_DATA_SCHEMA, errors=errors)
 
+        from botocore.exceptions import ParamValidationError
+
         try:
-            await self.get_devices(self.data[CONF_EMAIL], user_input[CONF_CODE])
+            await self._async_load_devices(user_input[CONF_CODE])
             return await self.async_step_devices()
         except ParamValidationError:
             errors[CONF_CODE] = "invalid_code"
@@ -103,18 +104,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="code", data_schema=STEP_CODE_DATA_SCHEMA, errors=errors)
 
-    async def async_step_devices(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_devices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle device selection after authentication succeeds."""
         if user_input is None:
             return self.async_show_form(
                 step_id="devices",
                 data_schema=vol.Schema(
                     {
-                        vol.Required("feeders", default=list(self._feeders)): cv.multi_select(self._feeders),
-                        vol.Required("litterboxes", default=list(self._litterboxes)): cv.multi_select(
-                            self._litterboxes
+                        vol.Required("feeders", default=list(self._feeders or {})): cv.multi_select(self._feeders or {}),
+                        vol.Required("litterboxes", default=list(self._litterboxes or {})): cv.multi_select(
+                            self._litterboxes or {}
                         ),
-                        vol.Required("smartdoors", default=list(self._smartdoors)): cv.multi_select(self._smartdoors),
+                        vol.Required("smartdoors", default=list(self._smartdoors or {})): cv.multi_select(
+                            self._smartdoors or {}
+                        ),
                     }
                 ),
             )
@@ -125,20 +128,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.data[CONF_REFRESH_TOKEN] = self._refresh_token
         return self.async_create_entry(title=self.data[CONF_EMAIL], data=self.data)
 
-    async def get_email_code(self, petsafe: Any, email: str) -> bool:
+    async def _async_request_email_code(self, petsafe: Any, email: str) -> None:
         """Request a one-time email code from the PetSafe API."""
         self._client = await self.hass.async_add_executor_job(partial(petsafe.PetSafeClient, email=email))
+        if self._client is None:
+            raise RuntimeError("PetSafe client was not initialized")
         await self._client.request_code()
-        return True
 
-    async def get_devices(self, _email: str, code: str) -> bool:
+    async def _async_load_devices(self, code: str) -> None:
         """Exchange the code for tokens and load the user's devices."""
+        if self._client is None:
+            raise RuntimeError("PetSafe client was not initialized")
+
         await self._client.request_tokens_from_code(code)
         self._id_token = self._client.id_token
         self._access_token = self._client.access_token
         self._refresh_token = self._client.refresh_token
 
         self._feeders = {device.api_name: device.friendly_name for device in await self._client.get_feeders()}
-        self._litterboxes = {device.api_name: device.friendly_name for device in await self._client.get_litterboxes()}
+        self._litterboxes = {
+            device.api_name: device.friendly_name for device in await self._client.get_litterboxes()
+        }
         self._smartdoors = {device.api_name: device.friendly_name for device in await self._client.get_smartdoors()}
-        return True
+
+
+__all__ = ["ConfigFlow"]

@@ -1,7 +1,16 @@
-"""Constants for the PetSafe Integration integration."""
+"""Constants for the PetSafe Extended integration."""
+
+from logging import Logger, getLogger
+
+LOGGER: Logger = getLogger(__package__)
 
 DOMAIN = "petsafe_extended"
+ATTRIBUTION = "Data provided by the PetSafe API."
 PARALLEL_UPDATES = 0
+
+DEFAULT_UPDATE_INTERVAL_HOURS = 1
+DEFAULT_ENABLE_DEBUGGING = False
+
 CONF_REFRESH_TOKEN = "refresh_token"
 MANUFACTURER = "PetSafe"
 FEEDER_MODEL_GEN1 = "SmartFeed_1.0"
