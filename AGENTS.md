@@ -391,6 +391,8 @@ script/check      # Full validation (type + lint + spell)
 script/lint       # Auto-format and fix linting issues
 script/type-check # Pyright type checking only
 script/test       # Run unit tests
+script/check-critical # Focused auth/polling/SmartDoor checks
+script/test-critical  # Focused auth/polling/SmartDoor tests
 ```
 
 **Configured tools:**
@@ -413,6 +415,27 @@ See `.github/instructions/python.instructions.md` for linter overrides and error
 - You may use `# noqa: CODE` or `# type: ignore` when genuinely necessary
 - Use sparingly and only with good reason (e.g., false positives, external library issues)
 See `.github/instructions/python.instructions.md` for linter overrides and error recovery strategies.
+
+### Critical Runtime Paths
+
+For changes touching authentication, polling, or SmartDoor behavior, the following files are considered critical:
+
+- `custom_components/petsafe_extended/__init__.py`
+- `custom_components/petsafe_extended/config_flow.py`
+- `custom_components/petsafe_extended/lock.py`
+- `custom_components/petsafe_extended/SmartDoorEntities.py`
+- `custom_components/petsafe_extended/utils/auth.py`
+- `tests/test_config_flow.py`
+- `tests/test_coordinator_auth.py`
+- `tests/test_smartdoor.py`
+
+**When any critical runtime path changes:**
+
+- `script/check-critical` is mandatory before completion
+- `script/test-critical` is mandatory before completion if you need to rerun only the focused suite
+- Do not treat unrelated legacy type issues elsewhere in the repo as a reason to skip these focused checks
+- Do not bypass or disable the pre-commit hook or GitHub workflow that runs these checks
+- If the checks cannot run, stop and report the blocker explicitly
 
 ### Error Recovery Strategy
 
@@ -516,7 +539,9 @@ See `.github/instructions/tests.instructions.md` for comprehensive testing patte
 - Propose a plan first before starting implementation
 - Get explicit confirmation from developer
 
-**Important: Do NOT create or modify tests unless explicitly requested.** Focus on implementing functionality. The developer decides when and if tests are needed.
+**Important:** Do NOT create or modify tests unless explicitly requested.
+
+Exception: For authentication, polling, and SmartDoor changes, agents MUST add or update focused tests and run the critical checks above. These tests are part of the required safety net for this integration.
 
 **Translation strategy:**
 

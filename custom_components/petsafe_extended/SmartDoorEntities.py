@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Entity helpers for PetSafe SmartDoor devices."""
 
 from __future__ import annotations
@@ -11,14 +12,14 @@ from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UN
 from homeassistant.components.lock import LockEntity
 from homeassistant.const import ATTR_BATTERY_LEVEL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import PetSafeCoordinator, PetSafeData
+from . import PetSafeCoordinator
 from .const import DOMAIN, MANUFACTURER
 
 
-class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
+class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeCoordinator], LockEntity):
     """Representation of a PetSafe SmartDoor as a Home Assistant lock."""
 
     _door: petsafe.devices.DeviceSmartDoor | None
@@ -142,8 +143,9 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         )
 
     def _handle_coordinator_update(self) -> None:
+        """Update the cached SmartDoor reference from coordinator data."""
         data = self.coordinator.data
-        if not data:
+        if not data or self._door is None:
             return
 
         door = next(
@@ -153,5 +155,4 @@ class PetSafeSmartDoorLockEntity(CoordinatorEntity[PetSafeData], LockEntity):
         if door is not None:
             self._door = door
 
-        self.async_write_ha_state()
         super()._handle_coordinator_update()

@@ -26,6 +26,7 @@ Before considering any coding task complete, the following **must** pass:
 
 ```bash
 script/check      # Runs type-check + lint-check + spell-check
+script/check-critical # Required for auth, polling, and SmartDoor changes
 ```
 
 Generate code that passes these checks on first run. As an AI agent, you should produce higher quality code than manual development. Aim for zero validation errors.
@@ -65,7 +66,9 @@ Generate code that passes these checks on first run. As an AI agent, you should 
 5. **Validation:** run `script/check` before considering task complete
 6. **File size:** keep files at ~200-400 lines. Split large modules into smaller ones when needed.
 
-**Important: Do NOT write tests unless explicitly requested.** Focus on implementing functionality. The developer decides when and if tests are needed.
+**Important:** Do NOT write tests unless explicitly requested.
+
+Exception: when touching authentication, polling, or SmartDoor logic, agents MUST add or update focused tests and run `script/check-critical` before considering the work complete. These critical-path tests must not be skipped because of unrelated repo issues.
 
 **Translation strategy:**
 
@@ -111,6 +114,7 @@ pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script
 
 ```bash
 script/check      # Always run before considering task complete
+script/check-critical # Mandatory for auth, polling, and SmartDoor changes
 ```
 
 **Logs:**

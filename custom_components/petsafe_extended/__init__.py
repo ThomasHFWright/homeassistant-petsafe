@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """The PetSafe Integration integration."""
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -48,11 +49,13 @@ from .const import (
     SERVICE_PRIME,
 )
 from .helpers import get_feeders_for_service
+from .utils.auth import get_entry_unique_id
 
 if TYPE_CHECKING:
     import petsafe
 
 _LOGGER = logging.getLogger(__name__)
+_AUTH_STATUS_CODES = {401, 403}
 
 
 def _has_distribution(distribution_name: str) -> bool:
@@ -102,7 +105,7 @@ def _get_distribution_root(distribution_name: str, module_name: str) -> str | No
     except metadata.PackageNotFoundError:
         return None
 
-    module_init = dist.locate_file(f"{module_name}/__init__.py")
+    module_init = Path(str(dist.locate_file(f"{module_name}/__init__.py")))
     if module_init.exists():
         return str(module_init.parent.parent)
 
@@ -403,8 +406,33 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
     return platforms
 
 
+def _ensure_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Backfill a stable unique ID for legacy entries that do not have one yet."""
+    if entry.unique_id is not None:
+        return
+
+    unique_id = get_entry_unique_id(entry)
+    if unique_id is None:
+        return
+
+    if any(
+        existing_entry.entry_id != entry.entry_id and existing_entry.unique_id == unique_id
+        for existing_entry in hass.config_entries.async_entries(DOMAIN)
+    ):
+        _LOGGER.warning(
+            "Skipping unique_id backfill for entry %s because %s is already in use",
+            entry.entry_id,
+            unique_id,
+        )
+        return
+
+    hass.config_entries.async_update_entry(entry, unique_id=unique_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PetSafe Integration from a config entry."""
+    _ensure_entry_unique_id(hass, entry)
+
     try:
         petsafe = await _async_import_petsafe(hass)
     except (ModuleNotFoundError, RequirementsNotFound) as err:
@@ -428,8 +456,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_ids = call.data.get(ATTR_DEVICE_ID)
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
-        time = call.data.get(ATTR_TIME)
-        amount = call.data.get(ATTR_AMOUNT)
+        time = cast(str, call.data[ATTR_TIME])
+        amount = cast(int, call.data[ATTR_AMOUNT])
         matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
         for device_id in matched_devices:
             device = next(d for d in await coordinator.get_feeders() if d.api_name == device_id)
@@ -474,7 +502,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
         time = call.data.get(ATTR_TIME)
-        amount = call.data.get(ATTR_AMOUNT)
+        amount = cast(int, call.data[ATTR_AMOUNT])
         matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
@@ -492,8 +520,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_ids = call.data.get(ATTR_DEVICE_ID)
         area_ids = call.data.get(ATTR_AREA_ID)
         entity_ids = call.data.get(ATTR_ENTITY_ID)
-        amount = call.data.get(ATTR_AMOUNT)
-        slow_feed = call.data.get(ATTR_SLOW_FEED)
+        amount = cast(int, call.data[ATTR_AMOUNT])
+        slow_feed = cast(bool, call.data[ATTR_SLOW_FEED])
         matched_devices = get_feeders_for_service(hass, area_ids, device_ids, entity_ids)
 
         for device_id in matched_devices:
@@ -557,7 +585,7 @@ class PetSafeData:
         self.smartdoors = smartdoors
 
 
-class PetSafeCoordinator(DataUpdateCoordinator):
+class PetSafeCoordinator(DataUpdateCoordinator[PetSafeData]):
     """Data Update Coordinator for petsafe devices."""
 
     def __init__(self, hass: HomeAssistant, api: petsafe.PetSafeClient, entry: ConfigEntry):
@@ -571,13 +599,21 @@ class PetSafeCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=30),
         )
         self.api: petsafe.PetSafeClient = api
-        self.hass: HomeAssistant = hass
-        self._feeders: list[petsafe.devices.DeviceSmartFeed] = None
-        self._litterboxes: list[petsafe.devices.DeviceScoopfree] = None
-        self._smartdoors: list[petsafe.devices.DeviceSmartDoor] = None
+        self._feeders: list[petsafe.devices.DeviceSmartFeed] | None = None
+        self._litterboxes: list[petsafe.devices.DeviceScoopfree] | None = None
+        self._smartdoors: list[petsafe.devices.DeviceSmartDoor] | None = None
         self._device_lock = asyncio.Lock()
         self.entry = entry
-        self._authErrorCount = 0
+
+    @staticmethod
+    def _is_auth_error(error: httpx.HTTPStatusError) -> bool:
+        """Return whether an HTTP error should trigger reauthentication."""
+        return error.response.status_code in _AUTH_STATUS_CODES
+
+    @staticmethod
+    def _raise_auth_failed(error: httpx.HTTPStatusError) -> None:
+        """Raise a Home Assistant auth failure from an HTTP status error."""
+        raise ConfigEntryAuthFailed("PetSafe authentication failed") from error
 
     def _cached_snapshot(self) -> PetSafeData:
         """Build a data snapshot from the coordinator caches."""
@@ -617,11 +653,11 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 if self._feeders is None:
                     self._feeders = await self.api.get_feeders()
             except httpx.HTTPStatusError as ex:
-                if ex.response.status_code in (401, 403):
-                    await self.entry.async_start_reauth(self.hass)
-                else:
-                    raise
-            return self._feeders
+                if self._is_auth_error(ex):
+                    self._raise_auth_failed(ex)
+                raise
+
+            return self._feeders or []
 
     async def get_litterboxes(self) -> list[petsafe.devices.DeviceScoopfree]:
         """Return the list of litterboxes."""
@@ -630,11 +666,11 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 if self._litterboxes is None:
                     self._litterboxes = await self.api.get_litterboxes()
             except httpx.HTTPStatusError as ex:
-                if ex.response.status_code in (401, 403):
-                    await self.entry.async_start_reauth(self.hass)
-                else:
-                    raise
-            return self._litterboxes
+                if self._is_auth_error(ex):
+                    self._raise_auth_failed(ex)
+                raise
+
+            return self._litterboxes or []
 
     async def get_smartdoors(self) -> list[petsafe.devices.DeviceSmartDoor]:
         """Return the list of smart doors."""
@@ -643,11 +679,11 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 if self._smartdoors is None:
                     self._smartdoors = await self.api.get_smartdoors()
             except httpx.HTTPStatusError as ex:
-                if ex.response.status_code in (401, 403):
-                    await self.entry.async_start_reauth(self.hass)
-                else:
-                    raise
-            return self._smartdoors
+                if self._is_auth_error(ex):
+                    self._raise_auth_failed(ex)
+                raise
+
+            return self._smartdoors or []
 
     async def async_refresh_smartdoor(
         self,
@@ -670,8 +706,8 @@ class PetSafeCoordinator(DataUpdateCoordinator):
                 try:
                     await door.update_data()
                 except httpx.HTTPStatusError as ex:
-                    if ex.response.status_code in (401, 403):
-                        await self.entry.async_start_reauth(self.hass)
+                    if self._is_auth_error(ex):
+                        self._raise_auth_failed(ex)
                     raise
 
                 self._cache_smartdoor(door)
@@ -698,23 +734,16 @@ class PetSafeCoordinator(DataUpdateCoordinator):
         """Fetch data from API endpoint."""
         try:
             async with self._device_lock:
-                self._feeders = await self.api.get_feeders()
-                self._litterboxes = await self.api.get_litterboxes()
-                self._smartdoors = await self.api.get_smartdoors()
-                self._authErrorCount = 0
-                return PetSafeData(
-                    self._feeders,
-                    self._litterboxes,
-                    self._smartdoors,
-                )
+                feeders: list[petsafe.devices.DeviceSmartFeed] = await self.api.get_feeders()
+                litterboxes: list[petsafe.devices.DeviceScoopfree] = await self.api.get_litterboxes()
+                smartdoors: list[petsafe.devices.DeviceSmartDoor] = await self.api.get_smartdoors()
+                self._feeders = feeders
+                self._litterboxes = litterboxes
+                self._smartdoors = smartdoors
+                return PetSafeData(feeders, litterboxes, smartdoors)
         except httpx.HTTPStatusError as ex:
-            if ex.response.status_code in (401, 403):
-                self._authErrorCount += 1
-                if self._authErrorCount >= 5:
-                    self._authErrorCount = 0
-                    raise ConfigEntryAuthFailed from ex
-
-            else:
-                raise UpdateFailed from ex
+            if self._is_auth_error(ex):
+                self._raise_auth_failed(ex)
+            raise UpdateFailed("Failed to refresh PetSafe devices") from ex
         except Exception as ex:
-            raise UpdateFailed from ex
+            raise UpdateFailed("Failed to refresh PetSafe devices") from ex
