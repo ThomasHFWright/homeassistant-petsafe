@@ -45,6 +45,7 @@ CRITICAL_PY_FILES=(
     custom_components/petsafe_extended/utils/__init__.py
     custom_components/petsafe_extended/utils/auth.py
     custom_components/petsafe_extended/utils/device_selection.py
+    custom_components/petsafe_extended/utils/smartdoor.py
     tests/conftest.py
     tests/test_config_flow.py
     tests/test_coordinator_auth.py

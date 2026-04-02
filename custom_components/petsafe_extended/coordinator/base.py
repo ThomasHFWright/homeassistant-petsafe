@@ -45,6 +45,7 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorActivityRecord,
     PetSafeExtendedSmartDoorPetState,
 )
+from custom_components.petsafe_extended.utils.smartdoor import smartdoor_modes_match
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -519,7 +520,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 refreshed_door = door
                 self.async_set_updated_data(self._cached_snapshot())
 
-                if expected_mode is None or door.mode == expected_mode:
+                if expected_mode is None or smartdoor_modes_match(door.mode, expected_mode):
                     return door
 
             if attempt < attempts - 1:

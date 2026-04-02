@@ -5,12 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from custom_components.petsafe_extended.const import (
-    SMARTDOOR_MODE_MANUAL_LOCKED,
-    SMARTDOOR_MODE_MANUAL_UNLOCKED,
-    SMARTDOOR_MODE_SMART,
-)
 from custom_components.petsafe_extended.entity import PetSafeExtendedEntity
+from custom_components.petsafe_extended.utils.smartdoor import get_smartdoor_locked_state
 from homeassistant.components.lock import LockEntity, LockEntityDescription
 from homeassistant.const import ATTR_BATTERY_LEVEL
 
@@ -70,12 +66,7 @@ class PetSafeExtendedSmartDoorLock(LockEntity, PetSafeExtendedEntity):
         door = self._door
         if door is None:
             return None
-
-        if door.mode == SMARTDOOR_MODE_MANUAL_LOCKED:
-            return True
-        if door.mode in {SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART}:
-            return False
-        return None
+        return get_smartdoor_locked_state(door.mode, door.latch_state)
 
     @property
     def is_open(self) -> bool | None:
