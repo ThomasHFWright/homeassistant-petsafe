@@ -31,6 +31,9 @@ CRITICAL_PY_FILES=(
     custom_components/petsafe_extended/data.py
     custom_components/petsafe_extended/diagnostics.py
     custom_components/petsafe_extended/entity/smartdoor_pet.py
+    custom_components/petsafe_extended/entity/smartdoor_activity.py
+    custom_components/petsafe_extended/event/__init__.py
+    custom_components/petsafe_extended/event/smartdoor_activity.py
     custom_components/petsafe_extended/lock/__init__.py
     custom_components/petsafe_extended/lock/smartdoor.py
     custom_components/petsafe_extended/select/__init__.py

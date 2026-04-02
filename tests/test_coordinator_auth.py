@@ -13,6 +13,7 @@ import pytest
 import custom_components.petsafe_extended.button as button_platform
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
 from custom_components.petsafe_extended.data import PetSafeExtendedCoordinatorData
+import custom_components.petsafe_extended.event as event_platform
 import custom_components.petsafe_extended.lock as lock_platform
 import custom_components.petsafe_extended.select as select_platform
 import custom_components.petsafe_extended.sensor as sensor_platform
@@ -67,6 +68,7 @@ async def test_smartdoor_refresh_auth_failure_raises_reauth(hass, mock_config_en
     ("platform_module", "coordinator_method"),
     [
         (button_platform, "get_feeders"),
+        (event_platform, "get_smartdoors"),
         (lock_platform, "get_smartdoors"),
         (select_platform, "get_litterboxes"),
         (sensor_platform, "get_feeders"),
