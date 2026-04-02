@@ -3,29 +3,25 @@
 from __future__ import annotations
 
 # pylint: disable=import-error,protected-access,redefined-outer-name
-
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
+
 from homeassistant.exceptions import ConfigEntryNotReady
 
 try:
-    from petsafe.const import (
-        SMARTDOOR_MODE_MANUAL_LOCKED,
-        SMARTDOOR_MODE_MANUAL_UNLOCKED,
-        SMARTDOOR_MODE_SMART,
-    )
+    from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART
 except ModuleNotFoundError:  # pragma: no cover - fallback for lint environments
     SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
     SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
     SMARTDOOR_MODE_SMART = "smart"
 
-from custom_components.petsafe import PetSafeCoordinator, PetSafeData
-from custom_components.petsafe.const import DOMAIN
-from custom_components.petsafe.lock import async_setup_entry
-from custom_components.petsafe.SmartDoorEntities import PetSafeSmartDoorLockEntity
+from custom_components.petsafe_extended import PetSafeCoordinator, PetSafeData
+from custom_components.petsafe_extended.const import DOMAIN
+from custom_components.petsafe_extended.lock import async_setup_entry
+from custom_components.petsafe_extended.SmartDoorEntities import PetSafeSmartDoorLockEntity
 
 
 def _create_smartdoor(
@@ -71,8 +67,16 @@ def coordinator(hass, mock_config_entry):
 async def test_lock_entity_state_and_controls(hass, coordinator) -> None:
     """Validate SmartDoor lock entity properties and control actions."""
 
-    coordinator.async_request_refresh = AsyncMock()
     door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_LOCKED, latch_state="Open")
+    unlocked_door = _create_smartdoor(
+        mode=SMARTDOOR_MODE_MANUAL_UNLOCKED,
+        latch_state="Open",
+    )
+    relocked_door = _create_smartdoor(
+        mode=SMARTDOOR_MODE_MANUAL_LOCKED,
+        latch_state="Open",
+    )
+    coordinator.async_refresh_smartdoor = AsyncMock(side_effect=[unlocked_door, relocked_door])
     coordinator.data = PetSafeData([], [], [door])
 
     entity = PetSafeSmartDoorLockEntity(hass, door, coordinator)
@@ -97,14 +101,18 @@ async def test_lock_entity_state_and_controls(hass, coordinator) -> None:
 
     await entity.async_unlock()
     door.unlock.assert_awaited_once_with(update_data=False)
-    coordinator.async_request_refresh.assert_awaited()
+    assert entity.is_locked is False
 
-    coordinator.async_request_refresh.reset_mock()
     await entity.async_lock()
-    door.lock.assert_awaited_once_with(update_data=False)
-    coordinator.async_request_refresh.assert_awaited()
+    unlocked_door.lock.assert_awaited_once_with(update_data=False)
+    assert entity.is_locked is True
 
-    door.connection_status = "offline"
+    assert coordinator.async_refresh_smartdoor.await_args_list == [
+        call(door.api_name, expected_mode=SMARTDOOR_MODE_MANUAL_UNLOCKED),
+        call(door.api_name, expected_mode=SMARTDOOR_MODE_MANUAL_LOCKED),
+    ]
+
+    relocked_door.connection_status = "offline"
     assert entity.available is False
 
 
@@ -126,7 +134,7 @@ async def test_lock_entity_updates_from_coordinator(hass, coordinator) -> None:
     assert entity.is_locked is False
 
     coordinator.data = PetSafeData([], [], [updated_door])
-    entity._handle_coordinator_update()
+    entity._handle_coordinator_update()  # noqa: SLF001
 
     assert entity.is_locked is True
     assert entity.available is False
@@ -143,9 +151,7 @@ async def test_lock_platform_setup_adds_entities(hass, mock_config_entry) -> Non
     hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = coordinator
 
     async_add_entities = MagicMock()
-    with patch.object(
-        PetSafeCoordinator, "get_smartdoors", AsyncMock(return_value=[door])
-    ):
+    with patch.object(PetSafeCoordinator, "get_smartdoors", AsyncMock(return_value=[door])):
         await async_setup_entry(hass, mock_config_entry, async_add_entities)
 
     async_add_entities.assert_called_once()
@@ -163,18 +169,14 @@ async def test_lock_platform_setup_handles_failure(hass, mock_config_entry) -> N
     hass.data.setdefault(DOMAIN, {})[mock_config_entry.entry_id] = coordinator
 
     with (
-        patch.object(
-            PetSafeCoordinator, "get_smartdoors", AsyncMock(side_effect=RuntimeError)
-        ),
+        patch.object(PetSafeCoordinator, "get_smartdoors", AsyncMock(side_effect=RuntimeError)),
         pytest.raises(ConfigEntryNotReady),
     ):
         await async_setup_entry(hass, mock_config_entry, MagicMock())
 
 
 @pytest.mark.asyncio
-async def test_coordinator_get_smartdoors_caches_results(
-    hass, mock_config_entry
-) -> None:
+async def test_coordinator_get_smartdoors_caches_results(hass, mock_config_entry) -> None:
     """Coordinator caching should avoid redundant API calls."""
 
     api = MagicMock()
@@ -190,18 +192,14 @@ async def test_coordinator_get_smartdoors_caches_results(
 
 
 @pytest.mark.asyncio
-async def test_coordinator_get_smartdoors_triggers_reauth(
-    hass, mock_config_entry
-) -> None:
+async def test_coordinator_get_smartdoors_triggers_reauth(hass, mock_config_entry) -> None:
     """HTTP auth errors should trigger reauthentication flow."""
 
     api = MagicMock()
     request = httpx.Request("GET", "https://example.com")
     response = httpx.Response(401, request=request)
     api.get_smartdoors = AsyncMock(
-        side_effect=httpx.HTTPStatusError(
-            "Unauthorized", request=request, response=response
-        )
+        side_effect=httpx.HTTPStatusError("Unauthorized", request=request, response=response)
     )
     coordinator = PetSafeCoordinator(hass, api, mock_config_entry)
 
@@ -213,9 +211,7 @@ async def test_coordinator_get_smartdoors_triggers_reauth(
 
 
 @pytest.mark.asyncio
-async def test_coordinator_update_data_includes_smartdoors(
-    hass, mock_config_entry
-) -> None:
+async def test_coordinator_update_data_includes_smartdoors(hass, mock_config_entry) -> None:
     """The coordinator should populate smartdoor data during updates."""
 
     door = _create_smartdoor()
@@ -225,10 +221,45 @@ async def test_coordinator_update_data_includes_smartdoors(
     api.get_smartdoors = AsyncMock(return_value=[door])
     coordinator = PetSafeCoordinator(hass, api, mock_config_entry)
 
-    data = await coordinator._async_update_data()
+    await coordinator.async_refresh()
+    data = coordinator.data
 
     assert isinstance(data, PetSafeData)
     assert data.smartdoors == [door]
     api.get_feeders.assert_awaited_once()
     api.get_litterboxes.assert_awaited_once()
     api.get_smartdoors.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_refresh_smartdoor_updates_live_state(hass, mock_config_entry) -> None:
+    """Refreshing a SmartDoor after a command should publish the new state immediately."""
+
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_SMART)
+    mode_updates = iter(
+        [
+            SMARTDOOR_MODE_SMART,
+            SMARTDOOR_MODE_MANUAL_LOCKED,
+        ]
+    )
+
+    async def _update_data() -> None:
+        door.mode = next(mode_updates)
+
+    door.update_data = AsyncMock(side_effect=_update_data)
+    coordinator = PetSafeCoordinator(hass, MagicMock(), mock_config_entry)
+    coordinator.data = PetSafeData(["feeder"], ["litterbox"], [door])
+
+    refreshed = await coordinator.async_refresh_smartdoor(
+        door.api_name,
+        expected_mode=SMARTDOOR_MODE_MANUAL_LOCKED,
+        refresh_attempts=2,
+        refresh_interval=0,
+    )
+
+    assert refreshed is door
+    assert door.update_data.await_count == 2
+    assert coordinator.data.feeders == ["feeder"]
+    assert coordinator.data.litterboxes == ["litterbox"]
+    assert coordinator.data.smartdoors == [door]
+    assert coordinator.data.smartdoors[0].mode == SMARTDOOR_MODE_MANUAL_LOCKED
