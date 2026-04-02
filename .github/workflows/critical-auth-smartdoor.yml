@@ -1,0 +1,82 @@
+name: Critical Auth and SmartDoor Checks
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  critical:
+    name: Auth, Polling, and SmartDoor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.14.2"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14.2"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+        with:
+          version: "0.9.3"
+          enable-cache: true
+          cache-dependency-glob: "**/requirements*.txt"
+
+      - name: Get Home Assistant version
+        id: ha_version
+        run: |
+          HA_VERSION=$(grep '"homeassistant"' hacs.json | head -1 | sed 's/.*"homeassistant"\s*:\s*"\([^"]*\)".*/\1/')
+          echo "HA_VERSION=${HA_VERSION}" >> $GITHUB_OUTPUT
+          echo "Home Assistant version: ${HA_VERSION}"
+
+      - name: Install requirements
+        run: bash script/setup/bootstrap
+
+      - name: Run critical checks
+        id: critical_checks
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          bash script/check-critical 2>&1 | tee critical-check.log
+
+      - name: Surface critical check failure
+        if: steps.critical_checks.outcome == 'failure'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          log_text = Path("critical-check.log").read_text(encoding="utf-8", errors="replace")
+          log_text = re.sub(r"\x1b\[[0-9;]*m", "", log_text)
+          tail = "\n".join(log_text.splitlines()[-40:]).strip() or "critical-check.log was empty"
+          if len(tail) > 3000:
+              tail = tail[-3000:]
+
+          print("Last lines of critical-check.log:")
+          print(tail)
+
+          annotation = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(
+              "::error file=.github/workflows/critical-auth-smartdoor.yml,line=1::"
+              f"{annotation}"
+          )
+          PY
+          exit 1
+
+      - name: Upload critical check log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-check-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: critical-check.log
+          if-no-files-found: warn

@@ -6,9 +6,9 @@ from custom_components.petsafe_extended import PetSafeCoordinator, SensorEntitie
 from custom_components.petsafe_extended.const import DOMAIN
 from custom_components.petsafe_extended.helpers import filter_selected_devices
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 
@@ -23,6 +23,8 @@ async def async_setup_entry(
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
+    except ConfigEntryAuthFailed:
+        raise
     except Exception as exc:
         raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from exc
 

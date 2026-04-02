@@ -48,3 +48,11 @@ repos:
       #   pass_filenames: true
       #   # Run manually with: pre-commit run pyright --all-files
       #   stages: [manual]
+
+      # Focused high-signal checks that must run on every commit.
+      - id: critical-auth-smartdoor
+        name: critical auth, polling, and smartdoor checks
+        entry: bash -lc './script/check-critical'
+        language: system
+        pass_filenames: false
+        require_serial: true

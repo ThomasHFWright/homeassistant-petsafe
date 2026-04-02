@@ -1,15 +1,17 @@
+# pyright: reportMissingImports=false
 """Tests for PetSafe SmartDoor entities and platform setup."""
 
 from __future__ import annotations
 
 # pylint: disable=import-error,protected-access,redefined-outer-name
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
 
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 try:
     from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART
@@ -31,7 +33,7 @@ def _create_smartdoor(
     latch_state: str | None = "Closed",
     connection_status: str | None = "online",
     battery_level: int | None = 75,
-) -> SimpleNamespace:
+) -> Any:
     """Construct a SmartDoor device stub with async methods."""
 
     door = SimpleNamespace()
@@ -192,8 +194,8 @@ async def test_coordinator_get_smartdoors_caches_results(hass, mock_config_entry
 
 
 @pytest.mark.asyncio
-async def test_coordinator_get_smartdoors_triggers_reauth(hass, mock_config_entry) -> None:
-    """HTTP auth errors should trigger reauthentication flow."""
+async def test_coordinator_get_smartdoors_raises_auth_failed(hass, mock_config_entry) -> None:
+    """HTTP auth errors should raise Home Assistant reauth requests immediately."""
 
     api = MagicMock()
     request = httpx.Request("GET", "https://example.com")
@@ -203,11 +205,8 @@ async def test_coordinator_get_smartdoors_triggers_reauth(hass, mock_config_entr
     )
     coordinator = PetSafeCoordinator(hass, api, mock_config_entry)
 
-    mock_config_entry.async_start_reauth = AsyncMock()
-    result = await coordinator.get_smartdoors()
-
-    mock_config_entry.async_start_reauth.assert_awaited_once_with(hass)
-    assert result is None
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator.get_smartdoors()
 
 
 @pytest.mark.asyncio
@@ -248,7 +247,11 @@ async def test_coordinator_refresh_smartdoor_updates_live_state(hass, mock_confi
 
     door.update_data = AsyncMock(side_effect=_update_data)
     coordinator = PetSafeCoordinator(hass, MagicMock(), mock_config_entry)
-    coordinator.data = PetSafeData(["feeder"], ["litterbox"], [door])
+    coordinator.data = PetSafeData(
+        cast(Any, ["feeder"]),
+        cast(Any, ["litterbox"]),
+        [door],
+    )
 
     refreshed = await coordinator.async_refresh_smartdoor(
         door.api_name,

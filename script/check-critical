@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# script/check-critical: Validate auth, polling, and SmartDoor changes
+#
+# Runs focused linting, type checks, and tests for the highest-risk runtime
+# areas in this integration. This script is intentionally narrower than
+# script/check so that unrelated legacy type issues do not block critical
+# authentication and SmartDoor validation.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
+# shellcheck source=script/.lib/output.sh
+source "$SCRIPT_DIR/.lib/output.sh"
+# shellcheck source=script/.lib/venv.sh
+source "$SCRIPT_DIR/.lib/venv.sh"
+
+CRITICAL_PY_FILES=(
+    custom_components/petsafe_extended/__init__.py
+    custom_components/petsafe_extended/button/__init__.py
+    custom_components/petsafe_extended/config_flow.py
+    custom_components/petsafe_extended/lock.py
+    custom_components/petsafe_extended/select/__init__.py
+    custom_components/petsafe_extended/sensor/__init__.py
+    custom_components/petsafe_extended/SmartDoorEntities.py
+    custom_components/petsafe_extended/switch/__init__.py
+    custom_components/petsafe_extended/utils/__init__.py
+    custom_components/petsafe_extended/utils/auth.py
+    tests/conftest.py
+    tests/test_config_flow.py
+    tests/test_coordinator_auth.py
+    tests/test_smartdoor.py
+)
+
+CRITICAL_TEXT_FILES=(
+    .github/copilot-instructions.md
+    .github/workflows/critical-auth-smartdoor.yml
+    .pre-commit-config.yaml
+    AGENTS.md
+    script/.lib/venv.sh
+    script/check-critical
+    script/test
+    script/test-critical
+)
+
+activate_ha_venv
+
+log_header "Checking critical code format"
+ruff format --check "${CRITICAL_PY_FILES[@]}"
+
+log_header "Checking critical code with Ruff"
+ruff check "${CRITICAL_PY_FILES[@]}"
+
+log_header "Checking spelling for critical files"
+codespell \
+    --ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn \
+    --skip="./.*,*.csv,*.json,*.ambr,uv.lock" \
+    --quiet-level=2 \
+    "${CRITICAL_PY_FILES[@]}" \
+    "${CRITICAL_TEXT_FILES[@]}"
+
+log_header "Running targeted type checks"
+pyright "${CRITICAL_PY_FILES[@]}"
+
+log_header "Running critical auth, polling, and SmartDoor tests"
+bash "$SCRIPT_DIR/test-critical"
+
+# Clean up any accidental package installation from tooling
+"$SCRIPT_DIR/clean" --minimal
+
+log_success "Critical auth, polling, and SmartDoor checks completed"

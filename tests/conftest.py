@@ -7,6 +7,7 @@ from pathlib import Path
 # pylint: disable=wrong-import-position,import-error,too-few-public-methods
 import sys
 import types
+from typing import Any
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -16,16 +17,31 @@ from homeassistant.const import CONF_ACCESS_TOKEN, CONF_EMAIL, CONF_TOKEN
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 if "petsafe" not in sys.modules:
-    petsafe_module = types.ModuleType("petsafe")
-    petsafe_const = types.ModuleType("petsafe.const")
-    petsafe_const.SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
-    petsafe_const.SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
-    petsafe_const.SMARTDOOR_MODE_SMART = "smart"
-    petsafe_module.const = petsafe_const
-    petsafe_module.devices = types.SimpleNamespace(
-        DeviceSmartDoor=object,
-        DeviceSmartFeed=object,
-        DeviceScoopfree=object,
+    petsafe_module: Any = types.ModuleType("petsafe")
+    petsafe_const: Any = types.ModuleType("petsafe.const")
+    petsafe_client: Any = types.ModuleType("petsafe.client")
+
+    class _InvalidUserException(Exception):
+        """Stub invalid-user exception."""
+
+    class _InvalidCodeException(Exception):
+        """Stub invalid-code exception."""
+
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_LOCKED", "manual_locked")
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_UNLOCKED", "manual_unlocked")
+    setattr(petsafe_const, "SMARTDOOR_MODE_SMART", "smart")
+    setattr(petsafe_module, "const", petsafe_const)
+    setattr(petsafe_client, "InvalidUserException", _InvalidUserException)
+    setattr(petsafe_client, "InvalidCodeException", _InvalidCodeException)
+    setattr(petsafe_module, "client", petsafe_client)
+    setattr(
+        petsafe_module,
+        "devices",
+        types.SimpleNamespace(
+            DeviceSmartDoor=object,
+            DeviceSmartFeed=object,
+            DeviceScoopfree=object,
+        ),
     )
 
     class _StubPetSafeClient:  # pragma: no cover - import stub
@@ -34,8 +50,9 @@ if "petsafe" not in sys.modules:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-    petsafe_module.PetSafeClient = _StubPetSafeClient
+    setattr(petsafe_module, "PetSafeClient", _StubPetSafeClient)
     sys.modules["petsafe"] = petsafe_module
+    sys.modules["petsafe.client"] = petsafe_client
     sys.modules["petsafe.const"] = petsafe_const
 
 from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN

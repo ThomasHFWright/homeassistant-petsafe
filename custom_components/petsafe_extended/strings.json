@@ -12,6 +12,12 @@
           "code": "Confirmation Code"
         }
       },
+      "reauth_confirm": {
+        "description": "Check {email} for the new confirmation code",
+        "data": {
+          "code": "Confirmation Code"
+        }
+      },
       "devices": {
         "data": {
           "feeders": "Feeders",
@@ -27,7 +33,8 @@
       "unknown_error": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
   }
 }
