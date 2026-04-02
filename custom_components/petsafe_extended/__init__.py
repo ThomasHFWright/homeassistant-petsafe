@@ -7,7 +7,9 @@ from datetime import timedelta
 import importlib
 from importlib import metadata
 import logging
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
@@ -29,7 +31,8 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.loader import async_get_integration
-from homeassistant.requirements import RequirementsNotFound, _async_get_manager, async_process_requirements
+from homeassistant.requirements import RequirementsNotFound, _async_get_manager, async_process_requirements, pip_kwargs
+from homeassistant.util import package as pkg_util
 
 from .const import (
     ATTR_AMOUNT,
@@ -77,9 +80,13 @@ def _get_distribution_top_levels(distribution_name: str) -> list[str]:
 
 def _ensure_deps_path(config_dir: str) -> None:
     """Ensure Home Assistant's config deps directory is importable."""
-    deps_path = str(Path(config_dir) / "deps")
-    if deps_path not in sys.path:
-        sys.path.insert(0, deps_path)
+    _ensure_import_path(str(Path(config_dir) / "deps"))
+
+
+def _ensure_import_path(import_path: str) -> None:
+    """Ensure an import root is available on sys.path."""
+    if import_path not in sys.path:
+        sys.path.insert(0, import_path)
 
 
 def _invalidate_import_state() -> None:
@@ -102,11 +109,114 @@ def _get_distribution_root(distribution_name: str, module_name: str) -> str | No
     return None
 
 
+def _install_requirement_to_target(
+    requirement: str,
+    config_dir: str,
+    target: str,
+    module_name: str,
+) -> bool:
+    """Install a requirement into an explicit target and verify the module files exist."""
+    requirement_details = pkg_util.parse_requirement_safe(requirement)
+    if requirement_details is None:
+        return False
+
+    target_path = Path(target)
+    target_path.mkdir(parents=True, exist_ok=True)
+
+    install_kwargs = pip_kwargs(config_dir)
+    install_args = [
+        *_get_uv_command(),
+        "pip",
+        "install",
+        "--quiet",
+        requirement,
+        "--index-strategy",
+        "unsafe-first-match",
+        "--upgrade",
+        "--target",
+        target,
+    ]
+    if constraints := install_kwargs.get("constraints"):
+        install_args += ["--constraint", constraints]
+
+    env = os.environ.copy()
+    if timeout := install_kwargs.get("timeout"):
+        env["HTTP_TIMEOUT"] = str(timeout)
+
+    result = subprocess.run(
+        install_args,
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+    )
+    if result.returncode != 0:
+        error_output = result.stderr.strip() or result.stdout.strip()
+        _LOGGER.warning(
+            "Explicit petsafe-api install into %s failed with exit code %s: %s",
+            target,
+            result.returncode,
+            error_output,
+        )
+        return False
+
+    normalized_name = requirement_details.name.replace("-", "_")
+    module_init = target_path / module_name / "__init__.py"
+    dist_info_exists = any(target_path.glob(f"{normalized_name}-*.dist-info"))
+    if not module_init.exists() and not dist_info_exists:
+        _LOGGER.warning(
+            (
+                "Explicit petsafe-api install into %s exited successfully but left no module files. "
+                "python=%s sys_executable=%s sys_prefix=%s stdout=%s stderr=%s"
+            ),
+            target,
+            _get_runtime_python(),
+            sys.executable,
+            sys.prefix,
+            result.stdout.strip() or "<empty>",
+            result.stderr.strip() or "<empty>",
+        )
+
+    return module_init.exists() or dist_info_exists
+
+
+def _get_runtime_deps_path() -> str:
+    """Return an explicit runtime dependency directory outside the workspace mount."""
+    return str(Path.home() / ".cache" / DOMAIN / "deps")
+
+
+def _get_runtime_python() -> str:
+    """Return the Home Assistant runtime interpreter path."""
+    argv0_path = Path(sys.argv[0]).resolve()
+    candidates = [
+        argv0_path.with_name("python3"),
+        argv0_path.with_name("python"),
+        argv0_path.with_name("python.exe"),
+        Path(sys.prefix) / "bin" / "python3",
+        Path(sys.prefix) / "bin" / "python",
+        Path(sys.prefix) / "Scripts" / "python.exe",
+        Path(sys.executable),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return sys.executable
+
+
+def _get_uv_command() -> list[str]:
+    """Return the best available uv command."""
+    if uv_path := shutil.which("uv"):
+        return [uv_path]
+
+    return [_get_runtime_python(), "-m", "uv"]
+
+
 def _run_uv_command(*args: str) -> str | None:
     """Return stdout from a uv command for the current interpreter."""
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "uv", *args],
+            [*_get_uv_command(), *args],
             capture_output=True,
             check=False,
             text=True,
@@ -157,23 +267,33 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
     integration = await async_get_integration(hass, DOMAIN)
     manager = _async_get_manager(hass)
     _ensure_deps_path(hass.config.config_dir)
+    deps_path = await hass.async_add_executor_job(_get_runtime_deps_path)
+    requirements_error: RequirementsNotFound | None = None
 
     if not await hass.async_add_executor_job(_has_distribution, "petsafe-api"):
         for requirement in integration.requirements:
             manager.is_installed_cache.discard(requirement)
             manager.install_failure_history.discard(requirement)
 
-    await async_process_requirements(
-        hass,
-        integration.domain,
-        integration.requirements,
-        integration.is_built_in,
-    )
+    try:
+        await async_process_requirements(
+            hass,
+            integration.domain,
+            integration.requirements,
+            integration.is_built_in,
+        )
+    except RequirementsNotFound as err:
+        requirements_error = err
+        _LOGGER.warning(
+            "Home Assistant requirement processing did not yield an importable petsafe-api distribution; "
+            "trying explicit deps installation"
+        )
+
     await hass.async_add_executor_job(_invalidate_import_state)
 
     try:
         return await hass.async_add_executor_job(importlib.import_module, "petsafe")
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as err:
         candidate_roots = [
             await hass.async_add_executor_job(_get_distribution_root, "petsafe-api", "petsafe"),
             await hass.async_add_executor_job(_get_uv_install_location, "petsafe-api"),
@@ -183,8 +303,7 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             if not import_root:
                 continue
 
-            if import_root not in sys.path:
-                sys.path.insert(0, import_root)
+            _ensure_import_path(import_root)
 
             await hass.async_add_executor_job(_invalidate_import_state)
             try:
@@ -195,8 +314,7 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
         cache_dir: Path | None = await hass.async_add_executor_job(_get_uv_cache_dir)
         if cache_dir:
             if archive_parent := await hass.async_add_executor_job(_get_uv_archive_parent, cache_dir, "petsafe"):
-                if archive_parent not in sys.path:
-                    sys.path.insert(0, archive_parent)
+                _ensure_import_path(archive_parent)
                 await hass.async_add_executor_job(_invalidate_import_state)
                 return await hass.async_add_executor_job(importlib.import_module, "petsafe")
 
@@ -212,6 +330,31 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             _LOGGER.warning("Imported petsafe-api using top-level module '%s'", module_name)
             return module
 
+        _LOGGER.warning("Attempting explicit petsafe-api install into %s", deps_path)
+        async with manager.pip_lock:
+            install_ok = True
+            for requirement in integration.requirements:
+                manager.is_installed_cache.discard(requirement)
+                manager.install_failure_history.discard(requirement)
+                installed = await hass.async_add_executor_job(
+                    _install_requirement_to_target,
+                    requirement,
+                    hass.config.config_dir,
+                    deps_path,
+                    "petsafe",
+                )
+                if installed:
+                    manager.is_installed_cache.add(requirement)
+                    continue
+
+                manager.install_failure_history.add(requirement)
+                install_ok = False
+
+            if install_ok:
+                _ensure_import_path(deps_path)
+                await hass.async_add_executor_job(_invalidate_import_state)
+                return await hass.async_add_executor_job(importlib.import_module, "petsafe")
+
         _LOGGER.warning(
             (
                 "petsafe-api installation did not yield an importable 'petsafe' module; "
@@ -222,6 +365,8 @@ async def _async_import_petsafe(hass: HomeAssistant) -> Any:
             cache_dir,
             Path.home(),
         )
+        if requirements_error is not None:
+            raise requirements_error from err
         raise
 
 
