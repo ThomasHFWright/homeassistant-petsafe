@@ -81,6 +81,23 @@
                     "activity": "Activity detected"
                 }
             }
+        },
+        "select": {
+            "operating_mode": {
+                "name": "Operating Mode",
+                "state": {
+                    "locked": "Locked",
+                    "unlocked": "Unlocked",
+                    "smart": "Smart"
+                }
+            },
+            "final_act": {
+                "name": "Power Loss Action",
+                "state": {
+                    "locked": "Locked",
+                    "unlocked": "Unlocked"
+                }
+            }
         }
     }
 }

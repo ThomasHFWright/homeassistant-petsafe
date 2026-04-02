@@ -62,3 +62,11 @@ SMARTDOOR_MODE_SMART: Final = _load_optional_petsafe_const(
     "SMARTDOOR_MODE_SMART",
     "smart",
 )
+SMARTDOOR_FINAL_ACT_LOCKED: Final = _load_optional_petsafe_const(
+    "SMARTDOOR_FINAL_ACT_LOCKED",
+    "LOCKED",
+)
+SMARTDOOR_FINAL_ACT_UNLOCKED: Final = _load_optional_petsafe_const(
+    "SMARTDOOR_FINAL_ACT_UNLOCKED",
+    "UNLOCKED",
+)

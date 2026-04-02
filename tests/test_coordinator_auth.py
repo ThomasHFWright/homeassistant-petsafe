@@ -71,6 +71,7 @@ async def test_smartdoor_refresh_auth_failure_raises_reauth(hass, mock_config_en
         (event_platform, "get_smartdoors"),
         (lock_platform, "get_smartdoors"),
         (select_platform, "get_litterboxes"),
+        (select_platform, "get_smartdoors"),
         (sensor_platform, "get_feeders"),
         (sensor_platform, "get_smartdoors"),
         (switch_platform, "get_feeders"),
@@ -96,6 +97,8 @@ async def test_platform_setup_propagates_auth_failures(
                 patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
             ]
         )
+    if platform_module is select_platform and coordinator_method == "get_smartdoors":
+        patches.append(patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])))
 
     with ExitStack() as stack:
         for patcher in patches:

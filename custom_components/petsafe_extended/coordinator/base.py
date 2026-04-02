@@ -47,7 +47,11 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorActivityRecord,
     PetSafeExtendedSmartDoorPetState,
 )
-from custom_components.petsafe_extended.utils.smartdoor import smartdoor_modes_match
+from custom_components.petsafe_extended.utils.smartdoor import (
+    get_smartdoor_final_act_value,
+    smartdoor_final_acts_match,
+    smartdoor_modes_match,
+)
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -492,29 +496,45 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
     async def async_set_smartdoor_lock(self, api_name: str, locked: bool) -> Any:
         """Lock or unlock a smart door and return the refreshed device."""
+        expected_mode = SMARTDOOR_MODE_MANUAL_LOCKED if locked else SMARTDOOR_MODE_MANUAL_UNLOCKED
+        return await self.async_set_smartdoor_operating_mode(api_name, expected_mode)
+
+    async def async_set_smartdoor_operating_mode(self, api_name: str, mode: str) -> Any:
+        """Set a SmartDoor operating mode and return the refreshed device."""
         await self.get_smartdoors()
         async with self._device_lock:
             door = self._find_cached_smartdoor(api_name)
             if door is None:
                 raise ValueError(f"Unknown SmartDoor API name: {api_name}")
             try:
-                if locked:
-                    await door.lock(update_data=False)
-                    expected_mode = SMARTDOOR_MODE_MANUAL_LOCKED
-                else:
-                    await door.unlock(update_data=False)
-                    expected_mode = SMARTDOOR_MODE_MANUAL_UNLOCKED
+                await door.set_mode(mode, update_data=False)
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
-        return await self.async_refresh_smartdoor(api_name, expected_mode=expected_mode)
+        return await self.async_refresh_smartdoor(api_name, expected_mode=mode)
+
+    async def async_set_smartdoor_final_act(self, api_name: str, final_act: str) -> Any:
+        """Set a SmartDoor final-act state and return the refreshed device."""
+        await self.get_smartdoors()
+        async with self._device_lock:
+            door = self._find_cached_smartdoor(api_name)
+            if door is None:
+                raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+            try:
+                await door.set_final_act(final_act, update_data=False)
+            except httpx.HTTPStatusError as err:
+                if self._is_auth_error(err):
+                    self._raise_auth_failed(err)
+                raise
+        return await self.async_refresh_smartdoor(api_name, expected_final_act=final_act)
 
     async def async_refresh_smartdoor(
         self,
         api_name: str,
         *,
         expected_mode: str | None = None,
+        expected_final_act: str | None = None,
         refresh_attempts: int = 4,
         refresh_interval: float = 1.0,
     ) -> Any:
@@ -548,7 +568,10 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 refreshed_door = door
                 self.async_set_updated_data(self._cached_snapshot())
 
-                if expected_mode is None or smartdoor_modes_match(door.mode, expected_mode):
+                if (expected_mode is None or smartdoor_modes_match(door.mode, expected_mode)) and (
+                    expected_final_act is None
+                    or smartdoor_final_acts_match(get_smartdoor_final_act_value(door), expected_final_act)
+                ):
                     return door
 
             if attempt < attempts - 1:
@@ -557,9 +580,10 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         if refreshed_door is None:
             raise ValueError(f"Unknown SmartDoor API name: {api_name}")
         LOGGER.debug(
-            "SmartDoor %s did not report expected mode %s after %s refresh attempts",
+            "SmartDoor %s did not report expected mode %s / final act %s after %s refresh attempts",
             api_name,
             expected_mode,
+            expected_final_act,
             attempts,
         )
         return refreshed_door
