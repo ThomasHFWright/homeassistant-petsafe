@@ -66,7 +66,7 @@ Key patterns:
 
 Do not write tests unless explicitly requested.
 
-Exception: when touching authentication, polling, or SmartDoor logic, agents must add or update focused tests and run `script/check-critical` before considering the work complete. These critical-path tests must not be skipped because of unrelated repo issues.
+Exception: when touching authentication, polling, or SmartDoor logic, agents must add or update focused tests, run `script/check-critical`, and rerun devcontainer E2E/runtime validation before considering the work complete. For PR follow-up fixes on those paths, rerun the devcontainer runtime validation again after the latest patch instead of relying on an earlier pass. These critical-path checks must not be skipped because of unrelated repo issues.
 
 Translation strategy:
 

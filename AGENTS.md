@@ -479,6 +479,9 @@ For changes touching authentication, polling, or SmartDoor behavior, the followi
 
 - `script/check-critical` is mandatory before completion
 - `script/test-critical` is mandatory before completion if you need to rerun only the focused suite
+- Devcontainer E2E/runtime validation is mandatory before completion
+- For follow-up fixes on an open PR touching the same critical paths, rerun the devcontainer E2E/runtime validation again after the latest patch. Do not rely on an earlier runtime pass from the branch.
+- Prefer validating against the real Home Assistant config entry in the devcontainer when one is already present. At minimum, restart HA with `./script/develop`, confirm the integration entry loads, and verify the relevant live entity or API-observable state for the changed path.
 - Do not treat unrelated legacy type issues elsewhere in the repo as a reason to skip these focused checks
 - Do not bypass or disable the pre-commit hook or GitHub workflow that runs these checks
 - If the checks cannot run, stop and report the blocker explicitly
