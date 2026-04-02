@@ -40,6 +40,18 @@ pkill -f "hass --config" || true && pkill -f "debugpy.*5678" || true && ./script
 
 **When to restart:** After modifying Python files, `manifest.json`, `services.yaml`, translations, or config flow changes
 
+**Shutdown after validation:** If you start Home Assistant for testing, debugging, or runtime validation, stop the instance again before finishing the task unless the developer explicitly asks you to leave it running. This includes background runs started via `./script/develop`, detached shells, and VS Code/debugpy-launched Home Assistant processes.
+
+**Required cleanup checklist before finishing a task after starting HA:**
+
+1. Stop all Home Assistant processes for this repo's config directory.
+2. Stop any matching `debugpy` adapter/launcher processes associated with that Home Assistant run.
+3. Verify no `hass`, `homeassistant`, or matching `debugpy` processes remain.
+4. If no HA process remains, remove a stale `config/.ha_run.lock` file if present.
+5. Verify port `8123` is no longer in use before reporting that cleanup is complete.
+
+Do not assume the instance is gone just because a stop command was issued. Always verify the process table and lock file state afterward.
+
 **Reading logs:**
 
 - Live: Terminal where `./script/develop` runs
@@ -450,11 +462,17 @@ For changes touching authentication, polling, or SmartDoor behavior, the followi
 
 - `custom_components/petsafe_extended/__init__.py`
 - `custom_components/petsafe_extended/config_flow.py`
-- `custom_components/petsafe_extended/lock.py`
-- `custom_components/petsafe_extended/SmartDoorEntities.py`
+- `custom_components/petsafe_extended/config_flow_handler/config_flow.py`
+- `custom_components/petsafe_extended/coordinator/base.py`
+- `custom_components/petsafe_extended/lock/__init__.py`
+- `custom_components/petsafe_extended/lock/smartdoor.py`
+- `custom_components/petsafe_extended/service_actions/__init__.py`
 - `custom_components/petsafe_extended/utils/auth.py`
+- `custom_components/petsafe_extended/utils/device_selection.py`
 - `tests/test_config_flow.py`
 - `tests/test_coordinator_auth.py`
+- `tests/test_feeder.py`
+- `tests/test_litterbox.py`
 - `tests/test_smartdoor.py`
 
 **When any critical runtime path changes:**
