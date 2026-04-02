@@ -21,6 +21,7 @@ if "petsafe" not in sys.modules:
     petsafe_module: Any = types.ModuleType("petsafe")
     petsafe_const: Any = types.ModuleType("petsafe.const")
     petsafe_client: Any = types.ModuleType("petsafe.client")
+    petsafe_pets: Any = types.ModuleType("petsafe.pets")
 
     class _InvalidUserException(Exception):
         """Stub invalid-user exception."""
@@ -51,10 +52,22 @@ if "petsafe" not in sys.modules:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
+    async def _list_pets(*args, **kwargs) -> list[Any]:
+        """Stub pet listing helper."""
+        return []
+
+    async def _list_pet_products(*args, **kwargs) -> list[Any]:
+        """Stub pet-product listing helper."""
+        return []
+
     setattr(petsafe_module, "PetSafeClient", _StubPetSafeClient)
+    setattr(petsafe_pets, "list_pets", _list_pets)
+    setattr(petsafe_pets, "list_pet_products", _list_pet_products)
+    setattr(petsafe_module, "pets", petsafe_pets)
     sys.modules["petsafe"] = petsafe_module
     sys.modules["petsafe.client"] = petsafe_client
     sys.modules["petsafe.const"] = petsafe_const
+    sys.modules["petsafe.pets"] = petsafe_pets
 
 from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
 from custom_components.petsafe_extended.data import PetSafeExtendedRuntimeData

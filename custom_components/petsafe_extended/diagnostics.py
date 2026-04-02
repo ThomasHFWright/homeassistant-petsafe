@@ -65,6 +65,18 @@ async def async_get_config_entry_diagnostics(
         "smartdoors": len(coordinator.data.smartdoors) if coordinator.data else 0,
         "feeder_details": len(coordinator.data.feeder_details) if coordinator.data else 0,
         "litterbox_details": len(coordinator.data.litterbox_details) if coordinator.data else 0,
+        "pet_profiles": len(coordinator.data.pet_links.pets_by_id) if coordinator.data else 0,
+        "pet_product_links": len(coordinator.data.pet_links.links) if coordinator.data else 0,
+        "linked_products": len(coordinator.data.pet_links.pet_ids_by_product_id) if coordinator.data else 0,
+        "smartdoor_activity_doors": len(coordinator.data.smartdoor_activity_records) if coordinator.data else 0,
+        "smartdoor_pet_states": (
+            sum(len(states) for states in coordinator.data.smartdoor_pet_states.values()) if coordinator.data else 0
+        ),
+        "pet_links_last_update": (
+            coordinator.data.pet_links.last_update.isoformat()
+            if coordinator.data and coordinator.data.pet_links.last_update
+            else None
+        ),
     }
 
     return {
