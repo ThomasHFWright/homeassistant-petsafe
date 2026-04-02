@@ -19,13 +19,16 @@ source "$SCRIPT_DIR/.lib/venv.sh"
 
 CRITICAL_PY_FILES=(
     custom_components/petsafe_extended/__init__.py
+    custom_components/petsafe_extended/api/pets.py
     custom_components/petsafe_extended/button/__init__.py
     custom_components/petsafe_extended/button/feeder_feed.py
     custom_components/petsafe_extended/button/litterbox_action.py
     custom_components/petsafe_extended/config_flow.py
     custom_components/petsafe_extended/config_flow_handler/config_flow.py
     custom_components/petsafe_extended/coordinator/base.py
+    custom_components/petsafe_extended/coordinator/pet_links.py
     custom_components/petsafe_extended/data.py
+    custom_components/petsafe_extended/diagnostics.py
     custom_components/petsafe_extended/lock/__init__.py
     custom_components/petsafe_extended/lock/smartdoor.py
     custom_components/petsafe_extended/select/__init__.py

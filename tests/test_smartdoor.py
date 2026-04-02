@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -15,7 +16,13 @@ from custom_components.petsafe_extended.const import (
     SMARTDOOR_MODE_SMART,
 )
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
-from custom_components.petsafe_extended.data import PetSafeExtendedCoordinatorData
+from custom_components.petsafe_extended.data import (
+    PetSafeExtendedCoordinatorData,
+    PetSafeExtendedPetLinkData,
+    PetSafeExtendedPetProductLink,
+    PetSafeExtendedPetProfile,
+)
+from custom_components.petsafe_extended.diagnostics import async_get_config_entry_diagnostics
 from custom_components.petsafe_extended.lock import async_setup_entry
 from custom_components.petsafe_extended.lock.smartdoor import PetSafeExtendedSmartDoorLock
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -48,6 +55,19 @@ def _create_smartdoor(
     door.lock = AsyncMock()
     door.unlock = AsyncMock()
     return door
+
+
+def _create_product_stub(api_name: str, product_name: str, product_type: str) -> Any:
+    """Construct a generic PetSafe product stub for coordinator tests."""
+    product = SimpleNamespace()
+    product.api_name = api_name
+    product.data = {
+        "productId": api_name,
+        "thingName": api_name,
+        "friendlyName": product_name,
+        "productName": product_type,
+    }
+    return product
 
 
 @pytest.fixture
@@ -229,6 +249,133 @@ async def test_coordinator_update_data_includes_smartdoors(hass, mock_config_ent
     api.get_feeders.assert_awaited_once()
     api.get_litterboxes.assert_awaited_once()
     api.get_smartdoors.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_builds_generic_pet_product_links(hass, mock_config_entry) -> None:
+    """Pet linkage should support one pet mapped to multiple product types."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    door.data["thingName"] = "door-1"
+    feeder = _create_product_stub("feeder-1", "Kitchen Feeder", "SmartFeed")
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[feeder])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+
+    pet_products = {
+        "pet-1": [
+            {"productId": "door-1", "productType": "SmartDoor"},
+            {"productId": "tracker-9", "productType": "Pet Tracker"},
+            {"productId": "feeder-1", "productType": "SmartFeed"},
+        ],
+        "pet-2": [
+            {"productId": "door-1", "productType": "SmartDoor"},
+        ],
+    }
+
+    with (
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pets",
+            AsyncMock(
+                return_value=[
+                    {"petId": "pet-1", "name": "Milo", "petType": "cat", "technology": "microchip"},
+                    {"petId": "pet-2", "name": "Otis", "petType": "cat"},
+                ]
+            ),
+        ),
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products",
+            AsyncMock(side_effect=lambda hass, client, pet_id: pet_products[pet_id]),
+        ),
+    ):
+        await coordinator.async_refresh()
+
+    data = coordinator.data
+
+    assert data is not None
+    assert data.pet_links.pets_by_id["pet-1"].name == "Milo"
+    assert data.pet_links.product_ids_by_pet_id["pet-1"] == ("door-1", "feeder-1", "tracker-9")
+    assert data.pet_links.pet_ids_by_product_id["door-1"] == ("pet-1", "pet-2")
+    assert data.pet_links.product_type_by_product_id["door-1"] == "smartdoor"
+    assert data.pet_links.product_type_by_product_id["feeder-1"] == "feeder"
+    assert data.pet_links.product_type_by_product_id["tracker-9"] == "tracker"
+    assert coordinator.get_product_ids_for_pet("pet-1") == ("door-1", "feeder-1", "tracker-9")
+    assert coordinator.get_smartdoor_pet_ids("door-1") == ("pet-1", "pet-2")
+
+
+@pytest.mark.asyncio
+async def test_coordinator_pet_links_use_slow_refresh_cache(hass, mock_config_entry) -> None:
+    """Pet directory endpoints should not run on every fast coordinator refresh."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+
+    list_pets = AsyncMock(return_value=[{"petId": "pet-1", "name": "Milo"}])
+    list_pet_products = AsyncMock(return_value=[{"productId": "door-1", "productType": "SmartDoor"}])
+
+    with (
+        patch("custom_components.petsafe_extended.coordinator.pet_links.async_list_pets", list_pets),
+        patch("custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products", list_pet_products),
+    ):
+        await coordinator.async_refresh()
+        await coordinator.async_refresh()
+
+    assert list_pets.await_count == 1
+    assert list_pet_products.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_do_not_expose_pet_link_identifiers(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Diagnostics should summarize pet links without leaking raw identifiers."""
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[_create_smartdoor(api_name="door-private")],
+        pet_links=PetSafeExtendedPetLinkData(
+            links=(
+                PetSafeExtendedPetProductLink(
+                    pet_id="pet-private",
+                    product_id="door-private",
+                    product_type="smartdoor",
+                ),
+            ),
+            pets_by_id={
+                "pet-private": PetSafeExtendedPetProfile(
+                    pet_id="pet-private",
+                    name="Milo",
+                    pet_type="cat",
+                    technology="microchip",
+                )
+            },
+            product_ids_by_pet_id={"pet-private": ("door-private",)},
+            pet_ids_by_product_id={"door-private": ("pet-private",)},
+            product_type_by_product_id={"door-private": "smartdoor"},
+        ),
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+    serialized = json.dumps(diagnostics)
+
+    assert diagnostics["data_summary"]["pet_profiles"] == 1
+    assert diagnostics["data_summary"]["pet_product_links"] == 1
+    assert diagnostics["data_summary"]["linked_products"] == 1
+    assert "pet-private" not in serialized
+    assert "door-private" not in serialized
 
 
 @pytest.mark.asyncio
