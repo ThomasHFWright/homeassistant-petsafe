@@ -9,18 +9,16 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import httpx
 import pytest
 
+from custom_components.petsafe_extended.const import (
+    SMARTDOOR_MODE_MANUAL_LOCKED,
+    SMARTDOOR_MODE_MANUAL_UNLOCKED,
+    SMARTDOOR_MODE_SMART,
+)
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
 from custom_components.petsafe_extended.data import PetSafeExtendedCoordinatorData
 from custom_components.petsafe_extended.lock import async_setup_entry
 from custom_components.petsafe_extended.lock.smartdoor import PetSafeExtendedSmartDoorLock
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-
-try:
-    from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART
-except ModuleNotFoundError:  # pragma: no cover - fallback for lint environments
-    SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
-    SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
-    SMARTDOOR_MODE_SMART = "smart"
 
 
 def _create_smartdoor(

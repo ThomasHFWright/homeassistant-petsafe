@@ -5,16 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from custom_components.petsafe_extended.const import (
+    SMARTDOOR_MODE_MANUAL_LOCKED,
+    SMARTDOOR_MODE_MANUAL_UNLOCKED,
+    SMARTDOOR_MODE_SMART,
+)
 from custom_components.petsafe_extended.entity import PetSafeExtendedEntity
 from homeassistant.components.lock import LockEntity, LockEntityDescription
 from homeassistant.const import ATTR_BATTERY_LEVEL
-
-try:
-    from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED, SMARTDOOR_MODE_SMART
-except ModuleNotFoundError:  # pragma: no cover - fallback for lint environments
-    SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
-    SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
-    SMARTDOOR_MODE_SMART = "smart"
 
 SMARTDOOR_LOCK_DESCRIPTION = LockEntityDescription(
     key="smartdoor_lock",

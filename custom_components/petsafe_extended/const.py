@@ -1,6 +1,8 @@
 """Constants for the PetSafe Extended integration."""
 
+import importlib
 from logging import Logger, getLogger
+from typing import Final
 
 LOGGER: Logger = getLogger(__package__)
 
@@ -35,3 +37,28 @@ RAKE_NOW = "RAKE_NOW"
 RAKE_COUNTER_RESET = "RAKE_COUNTER_RESET"
 
 FEED_DONE = "FEED_DONE"
+
+
+def _load_optional_petsafe_const(name: str, default: str) -> str:
+    """Load a petsafe-api constant without creating a static type-check dependency."""
+    try:
+        petsafe_const = importlib.import_module("petsafe.const")
+    except ModuleNotFoundError:
+        return default
+
+    value = getattr(petsafe_const, name, default)
+    return value if isinstance(value, str) else default
+
+
+SMARTDOOR_MODE_MANUAL_LOCKED: Final = _load_optional_petsafe_const(
+    "SMARTDOOR_MODE_MANUAL_LOCKED",
+    "manual_locked",
+)
+SMARTDOOR_MODE_MANUAL_UNLOCKED: Final = _load_optional_petsafe_const(
+    "SMARTDOOR_MODE_MANUAL_UNLOCKED",
+    "manual_unlocked",
+)
+SMARTDOOR_MODE_SMART: Final = _load_optional_petsafe_const(
+    "SMARTDOOR_MODE_SMART",
+    "smart",
+)

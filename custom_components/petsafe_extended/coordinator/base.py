@@ -17,6 +17,8 @@ from custom_components.petsafe_extended.const import (
     RAKE_BUTTON_DETECTED,
     RAKE_FINISHED,
     RAKE_NOW,
+    SMARTDOOR_MODE_MANUAL_LOCKED,
+    SMARTDOOR_MODE_MANUAL_UNLOCKED,
 )
 from custom_components.petsafe_extended.data import (
     PetSafeExtendedConfigEntry,
@@ -27,12 +29,6 @@ from custom_components.petsafe_extended.data import (
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-
-try:
-    from petsafe.const import SMARTDOOR_MODE_MANUAL_LOCKED, SMARTDOOR_MODE_MANUAL_UNLOCKED
-except ModuleNotFoundError:  # pragma: no cover - fallback for test environments
-    SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
-    SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
