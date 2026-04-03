@@ -50,7 +50,7 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         platforms.append(Platform.SWITCH)
     if _entry_has_selected_devices(entry, "feeders") or _entry_has_selected_devices(entry, "litterboxes"):
         platforms.append(Platform.BUTTON)
-    if _entry_has_selected_devices(entry, "litterboxes"):
+    if _entry_has_selected_devices(entry, "litterboxes") or _entry_has_selected_devices(entry, "smartdoors"):
         platforms.append(Platform.SELECT)
     if _entry_has_selected_devices(entry, "smartdoors"):
         platforms.append(Platform.EVENT)
