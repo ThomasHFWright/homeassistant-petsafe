@@ -84,10 +84,9 @@
         },
         "select": {
             "operating_mode": {
-                "name": "Operating Mode",
+                "name": "Locked Mode",
                 "state": {
                     "locked": "Locked",
-                    "unlocked": "Unlocked",
                     "smart": "Smart"
                 }
             },

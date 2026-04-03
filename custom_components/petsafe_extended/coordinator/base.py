@@ -20,6 +20,7 @@ from custom_components.petsafe_extended.const import (
     RAKE_NOW,
     SMARTDOOR_MODE_MANUAL_LOCKED,
     SMARTDOOR_MODE_MANUAL_UNLOCKED,
+    SMARTDOOR_MODE_SMART,
 )
 from custom_components.petsafe_extended.coordinator.pet_links import (
     PET_LINK_REFRESH_INTERVAL,
@@ -49,6 +50,7 @@ from custom_components.petsafe_extended.data import (
 )
 from custom_components.petsafe_extended.utils.smartdoor import (
     get_smartdoor_final_act_value,
+    get_smartdoor_locked_mode_option,
     smartdoor_final_acts_match,
     smartdoor_modes_match,
 )
@@ -88,6 +90,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
         self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+        self._smartdoor_locked_mode_preferences: dict[str, str] = {}
         self._smartdoor_activity_listeners: dict[
             str, list[Callable[[PetSafeExtendedSmartDoorActivityRecord], None]]
         ] = {}
@@ -162,6 +165,29 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             return self.data.smartdoor_pet_states
         return {}
 
+    def _normalize_smartdoor_locked_mode(self, mode: str | None) -> str:
+        """Return a supported SmartDoor locked-mode preference."""
+        if smartdoor_modes_match(mode, SMARTDOOR_MODE_SMART):
+            return SMARTDOOR_MODE_SMART
+        return SMARTDOOR_MODE_MANUAL_LOCKED
+
+    def _seed_smartdoor_locked_mode_preferences(self, smartdoors: list[Any]) -> None:
+        """Seed SmartDoor locked-mode preferences from live device state."""
+        previous_preferences = dict(self._smartdoor_locked_mode_preferences)
+        updated_preferences: dict[str, str] = {}
+
+        for door in smartdoors:
+            api_name = cast(str, door.api_name)
+            live_option = get_smartdoor_locked_mode_option(getattr(door, "mode", None))
+            if live_option == "smart":
+                updated_preferences[api_name] = SMARTDOOR_MODE_SMART
+            elif live_option == "locked":
+                updated_preferences[api_name] = SMARTDOOR_MODE_MANUAL_LOCKED
+            else:
+                updated_preferences[api_name] = previous_preferences.get(api_name, SMARTDOOR_MODE_MANUAL_LOCKED)
+
+        self._smartdoor_locked_mode_preferences = updated_preferences
+
     async def get_feeders(self) -> list[Any]:
         """Return the list of feeders."""
         async with self._device_lock:
@@ -235,6 +261,25 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     def get_smartdoor_pet_state(self, api_name: str, pet_id: str) -> PetSafeExtendedSmartDoorPetState | None:
         """Return the latest SmartDoor pet state for a linked pet."""
         return self._current_smartdoor_pet_states().get(api_name, {}).get(pet_id)
+
+    def get_smartdoor_locked_mode_preference(self, api_name: str) -> str:
+        """Return the preferred SmartDoor mode to apply when locking."""
+        return self._smartdoor_locked_mode_preferences.get(api_name, SMARTDOOR_MODE_MANUAL_LOCKED)
+
+    def get_smartdoor_locked_mode_option(self, api_name: str) -> str:
+        """Return the Home Assistant option for the preferred locked mode."""
+        option = get_smartdoor_locked_mode_option(self.get_smartdoor_locked_mode_preference(api_name))
+        return option or "locked"
+
+    @callback
+    def async_set_smartdoor_locked_mode_preference(self, api_name: str, mode: str) -> None:
+        """Persist the preferred SmartDoor mode to use when the door is locked."""
+        normalized_mode = self._normalize_smartdoor_locked_mode(mode)
+        if self._smartdoor_locked_mode_preferences.get(api_name) == normalized_mode:
+            return
+
+        self._smartdoor_locked_mode_preferences[api_name] = normalized_mode
+        self.async_set_updated_data(self._cached_snapshot())
 
     @callback
     def async_subscribe_smartdoor_activity(
@@ -496,23 +541,57 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
     async def async_set_smartdoor_lock(self, api_name: str, locked: bool) -> Any:
         """Lock or unlock a smart door and return the refreshed device."""
-        expected_mode = SMARTDOOR_MODE_MANUAL_LOCKED if locked else SMARTDOOR_MODE_MANUAL_UNLOCKED
+        if not locked:
+            return await self.async_set_smartdoor_operating_mode(api_name, SMARTDOOR_MODE_MANUAL_UNLOCKED)
+
+        expected_mode = self.get_smartdoor_locked_mode_preference(api_name)
         return await self.async_set_smartdoor_operating_mode(api_name, expected_mode)
 
     async def async_set_smartdoor_operating_mode(self, api_name: str, mode: str) -> Any:
         """Set a SmartDoor operating mode and return the refreshed device."""
+        normalized_mode = (
+            self._normalize_smartdoor_locked_mode(mode)
+            if not smartdoor_modes_match(
+                mode,
+                SMARTDOOR_MODE_MANUAL_UNLOCKED,
+            )
+            else SMARTDOOR_MODE_MANUAL_UNLOCKED
+        )
         await self.get_smartdoors()
         async with self._device_lock:
             door = self._find_cached_smartdoor(api_name)
             if door is None:
                 raise ValueError(f"Unknown SmartDoor API name: {api_name}")
             try:
-                await door.set_mode(mode, update_data=False)
+                await door.set_mode(normalized_mode, update_data=False)
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
-        return await self.async_refresh_smartdoor(api_name, expected_mode=mode)
+        refreshed = await self.async_refresh_smartdoor(api_name, expected_mode=normalized_mode)
+        if not smartdoor_modes_match(normalized_mode, SMARTDOOR_MODE_MANUAL_UNLOCKED):
+            self.async_set_smartdoor_locked_mode_preference(api_name, normalized_mode)
+        return refreshed
+
+    async def async_set_smartdoor_locked_mode(self, api_name: str, mode: str) -> Any:
+        """Set the preferred SmartDoor locked mode and apply it immediately when already locked."""
+        normalized_mode = self._normalize_smartdoor_locked_mode(mode)
+        await self.get_smartdoors()
+        async with self._device_lock:
+            door = self._find_cached_smartdoor(api_name)
+            if door is None:
+                raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+            current_mode = getattr(door, "mode", None)
+
+        if smartdoor_modes_match(current_mode, SMARTDOOR_MODE_MANUAL_UNLOCKED):
+            self.async_set_smartdoor_locked_mode_preference(api_name, normalized_mode)
+            return door
+
+        if smartdoor_modes_match(current_mode, normalized_mode):
+            self.async_set_smartdoor_locked_mode_preference(api_name, normalized_mode)
+            return door
+
+        return await self.async_set_smartdoor_operating_mode(api_name, normalized_mode)
 
     async def async_set_smartdoor_final_act(self, api_name: str, final_act: str) -> Any:
         """Set a SmartDoor final-act state and return the refreshed device."""
@@ -606,6 +685,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
+                self._seed_smartdoor_locked_mode_preferences(smartdoors)
                 self._feeder_details = feeder_details
                 self._litterbox_details = litterbox_details
                 self._pet_links = pet_links

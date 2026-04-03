@@ -50,7 +50,7 @@ from custom_components.petsafe_extended.select.smartdoor_operating_mode import (
 )
 from custom_components.petsafe_extended.sensor import async_setup_entry as async_setup_sensor_entry
 from custom_components.petsafe_extended.sensor.smartdoor_pet import PetSafeExtendedSmartDoorPetSensor
-from homeassistant.const import Platform
+from homeassistant.const import EntityCategory, Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
 
@@ -247,15 +247,31 @@ async def test_lock_entity_updates_from_coordinator(coordinator, hass) -> None:
 
 
 @pytest.mark.asyncio
+async def test_lock_entity_treats_smart_mode_as_locked(coordinator) -> None:
+    """Smart mode should remain on the locked side of the Home Assistant lock abstraction."""
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_SMART, latch_state="Closed")
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity = PetSafeExtendedSmartDoorLock(coordinator, door)
+
+    assert entity.is_locked is True
+
+
+@pytest.mark.asyncio
 async def test_lock_entity_normalizes_mode_and_latch_state(coordinator) -> None:
     """Lock state should tolerate raw API casing and fall back to latch state."""
     unlocked_door = _create_smartdoor(mode="MANUAL_UNLOCKED", latch_state="UNLOCKED")
+    smart_door = _create_smartdoor(mode="SMART", latch_state="Closed")
     locked_door = _create_smartdoor(mode="unexpected_mode", latch_state="LOCKED")
     unknown_door = _create_smartdoor(mode="unexpected_mode", latch_state="unexpected_state")
 
     coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[unlocked_door])
     unlocked_entity = PetSafeExtendedSmartDoorLock(coordinator, unlocked_door)
     assert unlocked_entity.is_locked is False
+
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[smart_door])
+    smart_entity = PetSafeExtendedSmartDoorLock(coordinator, smart_door)
+    assert smart_entity.is_locked is True
 
     coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[locked_door])
     locked_entity = PetSafeExtendedSmartDoorLock(coordinator, locked_door)
@@ -300,24 +316,54 @@ async def test_lock_platform_setup_handles_failure(hass, mock_config_entry, atta
 
 @pytest.mark.asyncio
 async def test_operating_mode_select_state_and_controls(coordinator) -> None:
-    """SmartDoor operating mode select should expose and change the current mode."""
+    """SmartDoor locked-mode select should expose and change the preferred locked mode."""
     door = _create_smartdoor(mode=SMARTDOOR_MODE_SMART)
     locked_door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_LOCKED)
-    coordinator.async_set_smartdoor_operating_mode = AsyncMock(return_value=locked_door)
+    coordinator.async_set_smartdoor_locked_mode = AsyncMock(return_value=locked_door)
     coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
 
     entity = PetSafeExtendedSmartDoorOperatingModeSelect(coordinator, door)
 
     assert entity.current_option == "smart"
     assert entity.translation_key == "operating_mode"
+    assert entity.entity_category is EntityCategory.CONFIG
 
     await entity.async_select_option("locked")
 
     assert entity.current_option == "locked"
-    coordinator.async_set_smartdoor_operating_mode.assert_awaited_once_with(
+    coordinator.async_set_smartdoor_locked_mode.assert_awaited_once_with(
         door.api_name,
         SMARTDOOR_MODE_MANUAL_LOCKED,
     )
+
+
+@pytest.mark.asyncio
+async def test_operating_mode_select_uses_locked_preference_when_unlocked(coordinator) -> None:
+    """When the SmartDoor is unlocked, the select should expose the stored locked-mode preference."""
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_UNLOCKED)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+    coordinator.async_set_smartdoor_locked_mode_preference(door.api_name, SMARTDOOR_MODE_SMART)
+
+    entity = PetSafeExtendedSmartDoorOperatingModeSelect(coordinator, door)
+
+    assert entity.current_option == "smart"
+
+
+@pytest.mark.asyncio
+async def test_operating_mode_select_restores_preference_when_unlocked(coordinator, hass) -> None:
+    """The locked-mode preference should restore across HA restarts while the door is unlocked."""
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_UNLOCKED)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity = PetSafeExtendedSmartDoorOperatingModeSelect(coordinator, door)
+    entity.hass = hass
+    entity.entity_id = "select.test_locked_mode"
+    entity.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state="smart"))  # type: ignore[method-assign]
+    coordinator.async_set_updated_data = MagicMock()
+
+    await entity.async_added_to_hass()
+
+    assert entity.current_option == "smart"
 
 
 @pytest.mark.asyncio
@@ -344,7 +390,7 @@ async def test_final_act_select_state_and_controls(coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_select_platform_adds_smartdoor_selects(hass, mock_config_entry, attach_runtime_data) -> None:
-    """The select platform should add the SmartDoor mode and final-act selects."""
+    """The select platform should add the SmartDoor locked-mode and final-act selects."""
     door = _create_smartdoor(api_name="door-1")
     coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
     mock_config_entry.add_to_hass(hass)
@@ -364,6 +410,10 @@ async def test_select_platform_adds_smartdoor_selects(hass, mock_config_entry, a
     assert any(isinstance(entity, PetSafeExtendedSmartDoorOperatingModeSelect) for entity in added_entities)
     assert any(isinstance(entity, PetSafeExtendedSmartDoorFinalActSelect) for entity in added_entities)
     assert {entity.translation_key for entity in added_entities} == {"operating_mode", "final_act"}
+    operating_mode_entity = next(
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorOperatingModeSelect)
+    )
+    assert operating_mode_entity.options == ["locked", "smart"]
     assert all(entity.device_info is not None for entity in added_entities)
     assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
 
@@ -1010,14 +1060,14 @@ async def test_coordinator_refresh_smartdoor_matches_modes_case_insensitively(ha
 
 
 @pytest.mark.asyncio
-async def test_coordinator_sets_smartdoor_operating_mode(hass, mock_config_entry) -> None:
-    """Coordinator operating-mode writes should call the library setter and refresh the door."""
+async def test_coordinator_sets_smartdoor_locked_mode_when_already_locked(hass, mock_config_entry) -> None:
+    """Changing the locked-mode preference while locked should update the live device mode."""
     door = _create_smartdoor(mode=SMARTDOOR_MODE_SMART)
     coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
     coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
     coordinator.async_refresh_smartdoor = AsyncMock(return_value=door)
 
-    refreshed = await coordinator.async_set_smartdoor_operating_mode(
+    refreshed = await coordinator.async_set_smartdoor_locked_mode(
         door.api_name,
         SMARTDOOR_MODE_MANUAL_LOCKED,
     )
@@ -1027,6 +1077,41 @@ async def test_coordinator_sets_smartdoor_operating_mode(hass, mock_config_entry
     coordinator.async_refresh_smartdoor.assert_awaited_once_with(
         door.api_name,
         expected_mode=SMARTDOOR_MODE_MANUAL_LOCKED,
+    )
+    assert coordinator.get_smartdoor_locked_mode_option(door.api_name) == "locked"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_updates_locked_mode_preference_without_api_when_unlocked(hass, mock_config_entry) -> None:
+    """Changing the locked-mode preference while unlocked should avoid SmartDoor mode writes."""
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_UNLOCKED)
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    refreshed = await coordinator.async_set_smartdoor_locked_mode(
+        door.api_name,
+        SMARTDOOR_MODE_SMART,
+    )
+
+    assert refreshed is door
+    door.set_mode.assert_not_awaited()
+    assert coordinator.get_smartdoor_locked_mode_option(door.api_name) == "smart"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_lock_uses_locked_mode_preference(hass, mock_config_entry) -> None:
+    """Lock requests should apply the stored locked-mode preference instead of always using manual lock."""
+    door = _create_smartdoor(mode=SMARTDOOR_MODE_MANUAL_UNLOCKED)
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+    coordinator.async_set_smartdoor_locked_mode_preference(door.api_name, SMARTDOOR_MODE_SMART)
+    coordinator.async_set_smartdoor_operating_mode = AsyncMock(return_value=door)
+
+    await coordinator.async_set_smartdoor_lock(door.api_name, True)
+
+    coordinator.async_set_smartdoor_operating_mode.assert_awaited_once_with(
+        door.api_name,
+        SMARTDOOR_MODE_SMART,
     )
 
 

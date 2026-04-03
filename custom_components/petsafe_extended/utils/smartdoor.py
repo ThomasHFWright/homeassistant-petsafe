@@ -39,12 +39,12 @@ def smartdoor_final_acts_match(actual: str | None, expected: str | None) -> bool
 def get_smartdoor_locked_state(mode: str | None, latch_state: str | None) -> bool | None:
     """Return the Home Assistant lock state for a SmartDoor."""
     normalized_mode = normalize_smartdoor_value(mode)
-    if normalized_mode == normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_LOCKED):
-        return True
     if normalized_mode in {
-        normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_UNLOCKED),
+        normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_LOCKED),
         normalize_smartdoor_value(SMARTDOOR_MODE_SMART),
     }:
+        return True
+    if normalized_mode == normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_UNLOCKED):
         return False
 
     normalized_latch_state = normalize_smartdoor_value(latch_state)
@@ -56,13 +56,11 @@ def get_smartdoor_locked_state(mode: str | None, latch_state: str | None) -> boo
     return None
 
 
-def get_smartdoor_operating_mode_option(mode: str | None) -> str | None:
-    """Return the Home Assistant operating-mode option for a SmartDoor mode."""
+def get_smartdoor_locked_mode_option(mode: str | None) -> str | None:
+    """Return the Home Assistant locked-mode option for a SmartDoor mode."""
     normalized_mode = normalize_smartdoor_value(mode)
     if normalized_mode == normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_LOCKED):
         return "locked"
-    if normalized_mode == normalize_smartdoor_value(SMARTDOOR_MODE_MANUAL_UNLOCKED):
-        return "unlocked"
     if normalized_mode == normalize_smartdoor_value(SMARTDOOR_MODE_SMART):
         return "smart"
     return None
