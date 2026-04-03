@@ -14,7 +14,15 @@ from .litterbox import LITTERBOX_SENSOR_DESCRIPTIONS, PetSafeExtendedLitterboxSe
 from .smartdoor_pet import (
     SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
     SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
+    SMARTDOOR_PET_NEXT_SMART_ACCESS_CHANGE_DESCRIPTION,
+    SMARTDOOR_PET_NEXT_SMART_ACCESS_DESCRIPTION,
+    SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
     PetSafeExtendedSmartDoorPetSensor,
+)
+from .smartdoor_schedule import (
+    SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
+    SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
+    PetSafeExtendedSmartDoorScheduleSensor,
 )
 
 
@@ -53,6 +61,17 @@ async def async_setup_entry(
         for description in (
             SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
             SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
+            SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
+            SMARTDOOR_PET_NEXT_SMART_ACCESS_DESCRIPTION,
+            SMARTDOOR_PET_NEXT_SMART_ACCESS_CHANGE_DESCRIPTION,
+        )
+    )
+    entities.extend(
+        PetSafeExtendedSmartDoorScheduleSensor(coordinator, smartdoor, description)
+        for smartdoor in smartdoors
+        for description in (
+            SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
+            SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
         )
     )
 

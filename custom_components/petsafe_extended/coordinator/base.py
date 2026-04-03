@@ -38,6 +38,15 @@ from custom_components.petsafe_extended.coordinator.smartdoor_activity import (
     parse_smartdoor_activity_records,
     seed_pet_states,
 )
+from custom_components.petsafe_extended.coordinator.smartdoor_schedules import (
+    build_smartdoor_pet_schedule_states,
+    build_smartdoor_schedule_summary,
+    copy_smartdoor_pet_schedule_states,
+    copy_smartdoor_schedule_rules,
+    copy_smartdoor_schedule_summaries,
+    get_smartdoor_scheduled_pet_ids,
+    parse_smartdoor_schedule_rules,
+)
 from custom_components.petsafe_extended.data import (
     PetSafeExtendedConfigEntry,
     PetSafeExtendedCoordinatorData,
@@ -46,7 +55,10 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedPetLinkData,
     PetSafeExtendedPetProfile,
     PetSafeExtendedSmartDoorActivityRecord,
+    PetSafeExtendedSmartDoorPetScheduleState,
     PetSafeExtendedSmartDoorPetState,
+    PetSafeExtendedSmartDoorScheduleRule,
+    PetSafeExtendedSmartDoorScheduleSummary,
 )
 from custom_components.petsafe_extended.utils.smartdoor import (
     get_smartdoor_final_act_value,
@@ -90,6 +102,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
         self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+        self._smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
+        self._smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
+        self._smartdoor_pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
         self._smartdoor_locked_mode_preferences: dict[str, str] = {}
         self._smartdoor_activity_listeners: dict[
             str, list[Callable[[PetSafeExtendedSmartDoorActivityRecord], None]]
@@ -121,6 +136,15 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._smartdoor_activity_records or current.smartdoor_activity_records
             ),
             smartdoor_pet_states=copy_smartdoor_pet_states(self._smartdoor_pet_states or current.smartdoor_pet_states),
+            smartdoor_schedule_rules=copy_smartdoor_schedule_rules(
+                self._smartdoor_schedule_rules or current.smartdoor_schedule_rules
+            ),
+            smartdoor_schedule_summaries=copy_smartdoor_schedule_summaries(
+                self._smartdoor_schedule_summaries or current.smartdoor_schedule_summaries
+            ),
+            smartdoor_pet_schedule_states=copy_smartdoor_pet_schedule_states(
+                self._smartdoor_pet_schedule_states or current.smartdoor_pet_schedule_states
+            ),
         )
 
     def _find_cached_feeder(self, api_name: str) -> Any | None:
@@ -163,6 +187,30 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             return self._smartdoor_pet_states
         if self.data is not None:
             return self.data.smartdoor_pet_states
+        return {}
+
+    def _current_smartdoor_schedule_rules(self) -> dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]]:
+        """Return cached SmartDoor schedule rules."""
+        if self._smartdoor_schedule_rules:
+            return self._smartdoor_schedule_rules
+        if self.data is not None:
+            return self.data.smartdoor_schedule_rules
+        return {}
+
+    def _current_smartdoor_schedule_summaries(self) -> dict[str, PetSafeExtendedSmartDoorScheduleSummary]:
+        """Return cached SmartDoor schedule summaries."""
+        if self._smartdoor_schedule_summaries:
+            return self._smartdoor_schedule_summaries
+        if self.data is not None:
+            return self.data.smartdoor_schedule_summaries
+        return {}
+
+    def _current_smartdoor_pet_schedule_states(self) -> dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]]:
+        """Return cached SmartDoor pet schedule states."""
+        if self._smartdoor_pet_schedule_states:
+            return self._smartdoor_pet_schedule_states
+        if self.data is not None:
+            return self.data.smartdoor_pet_schedule_states
         return {}
 
     def _normalize_smartdoor_locked_mode(self, mode: str | None) -> str:
@@ -261,6 +309,35 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     def get_smartdoor_pet_state(self, api_name: str, pet_id: str) -> PetSafeExtendedSmartDoorPetState | None:
         """Return the latest SmartDoor pet state for a linked pet."""
         return self._current_smartdoor_pet_states().get(api_name, {}).get(pet_id)
+
+    def get_smartdoor_schedule_rules(self, api_name: str) -> tuple[PetSafeExtendedSmartDoorScheduleRule, ...] | None:
+        """Return the cached SmartDoor schedule rules for a door."""
+        return self._current_smartdoor_schedule_rules().get(api_name)
+
+    def get_smartdoor_schedule_summary(self, api_name: str) -> PetSafeExtendedSmartDoorScheduleSummary | None:
+        """Return the cached SmartDoor schedule summary for a door."""
+        return self._current_smartdoor_schedule_summaries().get(api_name)
+
+    def get_smartdoor_scheduled_pet_ids(self, api_name: str) -> tuple[str, ...]:
+        """Return linked pets with at least one enabled SmartDoor schedule."""
+        rules = self.get_smartdoor_schedule_rules(api_name) or ()
+        scheduled_pet_ids = get_smartdoor_scheduled_pet_ids(rules)
+        if not scheduled_pet_ids:
+            return ()
+
+        linked_pet_ids = self.get_smartdoor_pet_ids(api_name)
+        scheduled_pet_id_set = set(scheduled_pet_ids)
+        ordered = tuple(pet_id for pet_id in linked_pet_ids if pet_id in scheduled_pet_id_set)
+        extras = tuple(pet_id for pet_id in scheduled_pet_ids if pet_id not in set(ordered))
+        return ordered + extras
+
+    def get_smartdoor_pet_schedule_state(
+        self,
+        api_name: str,
+        pet_id: str,
+    ) -> PetSafeExtendedSmartDoorPetScheduleState | None:
+        """Return the current SmartDoor schedule-derived state for a pet."""
+        return self._current_smartdoor_pet_schedule_states().get(api_name, {}).get(pet_id)
 
     def get_smartdoor_locked_mode_preference(self, api_name: str) -> str:
         """Return the preferred SmartDoor mode to apply when locking."""
@@ -645,6 +722,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     self._smartdoors.append(door)
 
                 refreshed_door = door
+                self._update_live_smartdoor_schedule_state(door)
                 self.async_set_updated_data(self._cached_snapshot())
 
                 if (expected_mode is None or smartdoor_modes_match(door.mode, expected_mode)) and (
@@ -682,6 +760,11 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     smartdoor_pet_states,
                     dispatch_records_by_door,
                 ) = await self._async_build_smartdoor_pet_states(smartdoors, pet_links)
+                (
+                    smartdoor_schedule_rules,
+                    smartdoor_schedule_summaries,
+                    smartdoor_pet_schedule_states,
+                ) = await self._async_build_smartdoor_schedule_data(smartdoors, pet_links)
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
@@ -691,6 +774,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._pet_links = pet_links
                 self._smartdoor_activity_records = smartdoor_activity_records
                 self._smartdoor_pet_states = smartdoor_pet_states
+                self._smartdoor_schedule_rules = smartdoor_schedule_rules
+                self._smartdoor_schedule_summaries = smartdoor_schedule_summaries
+                self._smartdoor_pet_schedule_states = smartdoor_pet_schedule_states
                 data = PetSafeExtendedCoordinatorData(
                     feeders=list(feeders),
                     litterboxes=list(litterboxes),
@@ -700,6 +786,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     pet_links=copy_pet_link_data(pet_links),
                     smartdoor_activity_records=copy_smartdoor_activity_records(smartdoor_activity_records),
                     smartdoor_pet_states=copy_smartdoor_pet_states(smartdoor_pet_states),
+                    smartdoor_schedule_rules=copy_smartdoor_schedule_rules(smartdoor_schedule_rules),
+                    smartdoor_schedule_summaries=copy_smartdoor_schedule_summaries(smartdoor_schedule_summaries),
+                    smartdoor_pet_schedule_states=copy_smartdoor_pet_schedule_states(smartdoor_pet_schedule_states),
                 )
         except httpx.HTTPStatusError as err:
             if self._is_auth_error(err):
@@ -821,6 +910,98 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._smartdoor_activity_cursor_by_door.pop(api_name, None)
 
         return activity_records, pet_states, dispatch_records_by_door
+
+    async def _async_build_smartdoor_schedule_data(
+        self,
+        smartdoors: list[Any],
+        pet_links: PetSafeExtendedPetLinkData,
+    ) -> tuple[
+        dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]],
+        dict[str, PetSafeExtendedSmartDoorScheduleSummary],
+        dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]],
+    ]:
+        """Build SmartDoor schedule caches used by calendar and summary entities."""
+        previous_rules = copy_smartdoor_schedule_rules(self._current_smartdoor_schedule_rules())
+        previous_summaries = copy_smartdoor_schedule_summaries(self._current_smartdoor_schedule_summaries())
+        previous_pet_schedule_states = copy_smartdoor_pet_schedule_states(self._current_smartdoor_pet_schedule_states())
+        schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
+        schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
+        pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
+
+        default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
+
+        for door in smartdoors:
+            door_api_name = cast(str, door.api_name)
+            linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ())))
+            pet_names_by_id: dict[str, str] = {}
+            for index, pet_id in enumerate(linked_pet_ids, start=1):
+                profile = pet_links.pets_by_id.get(pet_id)
+                pet_names_by_id[pet_id] = profile.name if profile is not None and profile.name else f"Pet {index}"
+
+            try:
+                schedules = await door.get_schedules()
+                preferences = await door.get_preferences()
+            except httpx.HTTPStatusError as err:
+                if self._is_auth_error(err):
+                    self._raise_auth_failed(err)
+                LOGGER.debug("Failed to refresh SmartDoor schedules for %s: %s", door_api_name, err)
+                if door_api_name in previous_rules:
+                    schedule_rules[door_api_name] = previous_rules[door_api_name]
+                if door_api_name in previous_summaries:
+                    schedule_summaries[door_api_name] = previous_summaries[door_api_name]
+                if door_api_name in previous_pet_schedule_states:
+                    pet_schedule_states[door_api_name] = previous_pet_schedule_states[door_api_name]
+                continue
+            except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+                LOGGER.debug("Failed to refresh SmartDoor schedules for %s: %s", door_api_name, err)
+                if door_api_name in previous_rules:
+                    schedule_rules[door_api_name] = previous_rules[door_api_name]
+                if door_api_name in previous_summaries:
+                    schedule_summaries[door_api_name] = previous_summaries[door_api_name]
+                if door_api_name in previous_pet_schedule_states:
+                    pet_schedule_states[door_api_name] = previous_pet_schedule_states[door_api_name]
+                continue
+
+            timezone = cast(str | None, preferences.get("tz")) if isinstance(preferences, dict) else None
+            rules = parse_smartdoor_schedule_rules(
+                schedules if isinstance(schedules, list) else [],
+                timezone=timezone or getattr(door, "timezone", None),
+                pet_names_by_id=pet_names_by_id,
+            )
+            schedule_rules[door_api_name] = rules
+            schedule_summaries[door_api_name] = build_smartdoor_schedule_summary(
+                rules,
+                linked_pet_ids,
+                now=dt_util.now().astimezone(default_timezone),
+                default_timezone=default_timezone,
+            )
+            pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
+                rules,
+                linked_pet_ids,
+                door_mode=getattr(door, "mode", None),
+                now=dt_util.now().astimezone(default_timezone),
+                default_timezone=default_timezone,
+            )
+
+        return schedule_rules, schedule_summaries, pet_schedule_states
+
+    def _update_live_smartdoor_schedule_state(self, door: Any) -> None:
+        """Recompute per-pet schedule state after a live SmartDoor mode refresh."""
+        door_api_name = cast(str, door.api_name)
+        rules = self._current_smartdoor_schedule_rules().get(door_api_name)
+        if rules is None:
+            return
+
+        pet_links = self._current_pet_links()
+        linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ()))) if pet_links else ()
+        default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
+        self._smartdoor_pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
+            rules,
+            linked_pet_ids,
+            door_mode=getattr(door, "mode", None),
+            now=dt_util.now().astimezone(default_timezone),
+            default_timezone=default_timezone,
+        )
 
     @callback
     def _async_dispatch_smartdoor_activity(

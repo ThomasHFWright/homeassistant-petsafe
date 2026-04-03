@@ -23,16 +23,20 @@ CRITICAL_PY_FILES=(
     custom_components/petsafe_extended/button/__init__.py
     custom_components/petsafe_extended/button/feeder_feed.py
     custom_components/petsafe_extended/button/litterbox_action.py
+    custom_components/petsafe_extended/calendar/__init__.py
+    custom_components/petsafe_extended/calendar/smartdoor_schedule.py
     custom_components/petsafe_extended/config_flow.py
     custom_components/petsafe_extended/config_flow_handler/config_flow.py
     custom_components/petsafe_extended/coordinator/base.py
     custom_components/petsafe_extended/coordinator/pet_links.py
     custom_components/petsafe_extended/coordinator/smartdoor_activity.py
+    custom_components/petsafe_extended/coordinator/smartdoor_schedules.py
     custom_components/petsafe_extended/data.py
     custom_components/petsafe_extended/diagnostics.py
     custom_components/petsafe_extended/entity/smartdoor_control.py
     custom_components/petsafe_extended/entity/smartdoor_pet.py
     custom_components/petsafe_extended/entity/smartdoor_activity.py
+    custom_components/petsafe_extended/entity/smartdoor_schedule.py
     custom_components/petsafe_extended/event/__init__.py
     custom_components/petsafe_extended/event/smartdoor_activity.py
     custom_components/petsafe_extended/lock/__init__.py
@@ -45,6 +49,7 @@ CRITICAL_PY_FILES=(
     custom_components/petsafe_extended/sensor/feeder.py
     custom_components/petsafe_extended/sensor/litterbox.py
     custom_components/petsafe_extended/sensor/smartdoor_pet.py
+    custom_components/petsafe_extended/sensor/smartdoor_schedule.py
     custom_components/petsafe_extended/service_actions/__init__.py
     custom_components/petsafe_extended/switch/__init__.py
     custom_components/petsafe_extended/switch/feeder_control.py

@@ -72,6 +72,21 @@ async def async_get_config_entry_diagnostics(
         "smartdoor_pet_states": (
             sum(len(states) for states in coordinator.data.smartdoor_pet_states.values()) if coordinator.data else 0
         ),
+        "smartdoor_schedule_doors": len(coordinator.data.smartdoor_schedule_rules) if coordinator.data else 0,
+        "smartdoor_schedule_rules": (
+            sum(len(rules) for rules in coordinator.data.smartdoor_schedule_rules.values()) if coordinator.data else 0
+        ),
+        "smartdoor_scheduled_pets": (
+            sum(summary.scheduled_pet_count for summary in coordinator.data.smartdoor_schedule_summaries.values())
+            if coordinator.data
+            else 0
+        ),
+        "smartdoor_schedule_summaries": len(coordinator.data.smartdoor_schedule_summaries) if coordinator.data else 0,
+        "smartdoor_pet_schedule_states": (
+            sum(len(states) for states in coordinator.data.smartdoor_pet_schedule_states.values())
+            if coordinator.data
+            else 0
+        ),
         "pet_links_last_update": (
             coordinator.data.pet_links.last_update.isoformat()
             if coordinator.data and coordinator.data.pet_links.last_update
