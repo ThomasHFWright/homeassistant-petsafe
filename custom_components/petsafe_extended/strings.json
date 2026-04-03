@@ -38,6 +38,11 @@
     }
   },
   "entity": {
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      }
+    },
     "event": {
       "activity": {
         "name": "Activity",
@@ -69,6 +74,12 @@
       }
     },
     "sensor": {
+      "schedule_rule_count": {
+        "name": "Schedule Rule Count"
+      },
+      "scheduled_pet_count": {
+        "name": "Scheduled Pet Count"
+      },
       "last_seen": {
         "name": "Last Seen"
       },
@@ -80,6 +91,29 @@
           "exited": "Exited",
           "activity": "Activity detected"
         }
+      },
+      "smart_access": {
+        "name": "Smart Access",
+        "state": {
+          "unknown": "Unknown",
+          "no_access": "No access",
+          "out_only": "Out only",
+          "in_only": "In only",
+          "full_access": "Full access"
+        }
+      },
+      "next_smart_access": {
+        "name": "Next Smart Access",
+        "state": {
+          "unknown": "Unknown",
+          "no_access": "No access",
+          "out_only": "Out only",
+          "in_only": "In only",
+          "full_access": "Full access"
+        }
+      },
+      "next_smart_access_change": {
+        "name": "Next Smart Access Change"
       }
     },
     "select": {

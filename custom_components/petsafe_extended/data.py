@@ -76,6 +76,51 @@ class PetSafeExtendedSmartDoorPetState:
     last_activity_code: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class PetSafeExtendedSmartDoorScheduleRule:
+    """A normalized SmartDoor schedule rule."""
+
+    schedule_id: str
+    title: str | None
+    start_time: str | None
+    day_of_week: str | None
+    access: str
+    is_enabled: bool
+    pet_ids: tuple[str, ...] = ()
+    pet_names: tuple[str, ...] = ()
+    pet_count: int = 0
+    timezone: str | None = None
+    next_action_at: datetime | None = None
+    prev_action_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class PetSafeExtendedSmartDoorScheduleSummary:
+    """A summarized view of SmartDoor schedule rules."""
+
+    schedule_rule_count: int = 0
+    enabled_schedule_count: int = 0
+    disabled_schedule_count: int = 0
+    scheduled_pet_count: int = 0
+    next_schedule_change_at: datetime | None = None
+    next_schedule_title: str | None = None
+    next_schedule_access: str | None = None
+    next_schedule_pet_name: str | None = None
+
+
+@dataclass(slots=True)
+class PetSafeExtendedSmartDoorPetScheduleState:
+    """Effective SmartDoor schedule-derived state for a linked pet."""
+
+    smart_access: str = "unknown"
+    effective_access: str = "unknown"
+    control_source: str = "smart"
+    active_schedule_title: str | None = None
+    next_change_at: datetime | None = None
+    next_smart_access: str | None = None
+    next_schedule_title: str | None = None
+
+
 @dataclass(slots=True)
 class PetSafeExtendedPetLinkData:
     """Generic pet-to-product linkage shared across product types."""
@@ -117,6 +162,11 @@ class PetSafeExtendedCoordinatorData:
         default_factory=dict
     )
     smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = field(default_factory=dict)
+    smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = field(default_factory=dict)
+    smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = field(default_factory=dict)
+    smartdoor_pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(slots=True)
