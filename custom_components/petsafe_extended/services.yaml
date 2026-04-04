@@ -91,3 +91,7 @@ prime:
   target:
     entity:
       integration: petsafe_extended
+
+refresh_pet_links:
+  name: Refresh pet links
+  description: Force an immediate refresh of pets and pet-to-product links for the account.

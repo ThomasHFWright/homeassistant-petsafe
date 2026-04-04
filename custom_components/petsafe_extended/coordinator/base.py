@@ -13,16 +13,23 @@ import httpx
 from custom_components.petsafe_extended.const import (
     CAT_IN_BOX,
     CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    COORDINATOR_HEARTBEAT_INTERVAL,
     DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DEVICE_LIST_REFRESH_INTERVAL,
     DOMAIN,
     ERROR_SENSOR_BLOCKED,
+    FEEDER_LAST_FEEDING_REFRESH_INTERVAL,
+    FEEDER_SCHEDULE_REFRESH_INTERVAL,
+    LITTERBOX_ACTIVITY_REFRESH_INTERVAL,
     LOGGER,
     RAKE_BUTTON_DETECTED,
     RAKE_FINISHED,
     RAKE_NOW,
+    SMARTDOOR_ACTIVITY_REFRESH_INTERVAL,
     SMARTDOOR_MODE_MANUAL_LOCKED,
     SMARTDOOR_MODE_MANUAL_UNLOCKED,
     SMARTDOOR_MODE_SMART,
+    SMARTDOOR_SCHEDULE_REFRESH_INTERVAL,
 )
 from custom_components.petsafe_extended.coordinator.pet_links import (
     PET_LINK_REFRESH_INTERVAL,
@@ -90,27 +97,44 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             hass,
             LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),
+            update_interval=COORDINATOR_HEARTBEAT_INTERVAL,
         )
         self.api = api
         self.config_entry = entry
         self._feeders: list[Any] | None = None
         self._litterboxes: list[Any] | None = None
         self._smartdoors: list[Any] | None = None
+        self._feeders_last_refresh_monotonic: float | None = None
+        self._litterboxes_last_refresh_monotonic: float | None = None
+        self._smartdoors_last_refresh_monotonic: float | None = None
         self._feeder_details: dict[str, PetSafeExtendedFeederDetails] = {}
         self._litterbox_details: dict[str, PetSafeExtendedLitterboxDetails] = {}
         self._pet_links: PetSafeExtendedPetLinkData | None = None
         self._pet_links_last_refresh_monotonic: float | None = None
+        self._feeder_schedule_payloads: dict[str, tuple[dict[str, Any], ...]] = {}
+        self._feeder_last_feeding_last_refresh_by_feeder: dict[str, float] = {}
+        self._feeder_schedule_last_refresh_by_feeder: dict[str, float] = {}
+        self._litterbox_activity_last_refresh_by_litterbox: dict[str, float] = {}
         self._smartdoor_activity_records: dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]] = {}
         self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
+        self._smartdoor_activity_last_refresh_by_door: dict[str, float] = {}
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
         self._smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
         self._smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
         self._smartdoor_pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
+        self._smartdoor_schedule_last_refresh_by_door: dict[str, float] = {}
         self._smartdoor_locked_mode_preferences: dict[str, str] = {}
         self._smartdoor_activity_listeners: dict[
             str, list[Callable[[PetSafeExtendedSmartDoorActivityRecord], None]]
         ] = {}
+        self._force_refresh_feeders = False
+        self._force_refresh_litterboxes = False
+        self._force_refresh_smartdoors = False
+        self._force_refresh_pet_links = False
+        self._force_refresh_feeder_last_feeding_api_names: set[str] = set()
+        self._force_refresh_feeder_schedule_api_names: set[str] = set()
+        self._force_refresh_litterbox_activity_api_names: set[str] = set()
+        self._force_refresh_smartdoor_schedule_api_names: set[str] = set()
         self._device_lock = asyncio.Lock()
 
     @staticmethod
@@ -214,6 +238,57 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         if self.data is not None:
             return self.data.smartdoor_pet_schedule_states
         return {}
+
+    @staticmethod
+    def _refresh_due(
+        last_refresh_monotonic: float | None,
+        interval: timedelta,
+        now_monotonic: float,
+        *,
+        force: bool = False,
+    ) -> bool:
+        """Return whether a cached value should be refreshed."""
+        return (
+            force
+            or last_refresh_monotonic is None
+            or (now_monotonic - last_refresh_monotonic) >= interval.total_seconds()
+        )
+
+    @staticmethod
+    def _cleanup_timestamp_map(last_refresh_by_key: dict[str, float], active_keys: set[str]) -> None:
+        """Drop per-device refresh timestamps for devices that no longer exist."""
+        for key in tuple(last_refresh_by_key):
+            if key not in active_keys:
+                last_refresh_by_key.pop(key, None)
+
+    @staticmethod
+    def _cleanup_force_refresh_keys(force_refresh_keys: set[str], active_keys: set[str]) -> None:
+        """Drop forced-refresh markers for devices that no longer exist."""
+        force_refresh_keys.intersection_update(active_keys)
+
+    def _cached_feeders_for_update(self) -> list[Any]:
+        """Return the current feeder cache for a coordinator refresh cycle."""
+        if self._feeders is not None:
+            return list(self._feeders)
+        if self.data is not None:
+            return list(self.data.feeders)
+        return []
+
+    def _cached_litterboxes_for_update(self) -> list[Any]:
+        """Return the current litterbox cache for a coordinator refresh cycle."""
+        if self._litterboxes is not None:
+            return list(self._litterboxes)
+        if self.data is not None:
+            return list(self.data.litterboxes)
+        return []
+
+    def _cached_smartdoors_for_update(self) -> list[Any]:
+        """Return the current SmartDoor cache for a coordinator refresh cycle."""
+        if self._smartdoors is not None:
+            return list(self._smartdoors)
+        if self.data is not None:
+            return list(self.data.smartdoors)
+        return []
 
     def _normalize_smartdoor_locked_mode(self, mode: str | None) -> str:
         """Return a supported SmartDoor locked-mode preference."""
@@ -362,6 +437,27 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         option = get_smartdoor_locked_mode_option(self.get_smartdoor_locked_mode_preference(api_name))
         return option or "locked"
 
+    async def async_refresh_feeder_schedule_data(self, api_name: str) -> None:
+        """Force a feeder schedule refresh on the next coordinator cycle."""
+        await self.get_feeders()
+        if self._find_cached_feeder(api_name) is None:
+            raise ValueError(f"Unknown feeder API name: {api_name}")
+        self._force_refresh_feeder_schedule_api_names.add(api_name)
+        await self.async_request_refresh()
+
+    async def async_refresh_smartdoor_schedule_data(self, api_name: str) -> None:
+        """Force a SmartDoor schedule and preference refresh on the next coordinator cycle."""
+        await self.get_smartdoors()
+        if self._find_cached_smartdoor(api_name) is None:
+            raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+        self._force_refresh_smartdoor_schedule_api_names.add(api_name)
+        await self.async_request_refresh()
+
+    async def async_refresh_pet_links(self) -> None:
+        """Force a pet-link refresh on the next coordinator cycle."""
+        self._force_refresh_pet_links = True
+        await self.async_request_refresh()
+
     @callback
     def async_set_smartdoor_locked_mode_preference(self, api_name: str, mode: str) -> None:
         """Persist the preferred SmartDoor mode to use when the door is locked."""
@@ -427,6 +523,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeders = True
+        self._force_refresh_feeder_last_feeding_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -447,6 +545,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeders = True
         if refresh:
             await self.async_request_refresh()
 
@@ -463,6 +562,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeders = True
         if refresh:
             await self.async_request_refresh()
 
@@ -479,6 +579,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeders = True
         if refresh:
             await self.async_request_refresh()
 
@@ -502,6 +603,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeder_schedule_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -529,6 +631,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeder_schedule_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -545,6 +648,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeder_schedule_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -573,6 +677,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_feeder_schedule_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -589,6 +694,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_litterboxes = True
+        self._force_refresh_litterbox_activity_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -605,6 +712,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_litterboxes = True
+        self._force_refresh_litterbox_activity_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -627,6 +736,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 raise
+        self._force_refresh_litterboxes = True
+        self._force_refresh_litterbox_activity_api_names.add(api_name)
         if refresh:
             await self.async_request_refresh()
 
@@ -759,30 +870,132 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         )
         return refreshed_door
 
+    async def _async_get_feeders_for_update(self, now_monotonic: float) -> list[Any]:
+        """Return the current feeder list, refreshing it when due."""
+        refresh_due = self._refresh_due(
+            self._feeders_last_refresh_monotonic,
+            DEVICE_LIST_REFRESH_INTERVAL,
+            now_monotonic,
+            force=self._force_refresh_feeders,
+        )
+        if not refresh_due:
+            return self._cached_feeders_for_update()
+
+        feeders = await self.api.get_feeders()
+        self._feeders_last_refresh_monotonic = now_monotonic
+        self._force_refresh_feeders = False
+        return feeders
+
+    async def _async_get_litterboxes_for_update(self, now_monotonic: float) -> list[Any]:
+        """Return the current litterbox list, refreshing it when due."""
+        refresh_due = self._refresh_due(
+            self._litterboxes_last_refresh_monotonic,
+            DEVICE_LIST_REFRESH_INTERVAL,
+            now_monotonic,
+            force=self._force_refresh_litterboxes,
+        )
+        if not refresh_due:
+            return self._cached_litterboxes_for_update()
+
+        litterboxes = await self.api.get_litterboxes()
+        self._litterboxes_last_refresh_monotonic = now_monotonic
+        self._force_refresh_litterboxes = False
+        return litterboxes
+
+    async def _async_get_smartdoors_for_update(self, now_monotonic: float) -> list[Any]:
+        """Return the current SmartDoor list, refreshing it when due."""
+        refresh_due = self._refresh_due(
+            self._smartdoors_last_refresh_monotonic,
+            DEVICE_LIST_REFRESH_INTERVAL,
+            now_monotonic,
+            force=self._force_refresh_smartdoors,
+        )
+        if not refresh_due:
+            return self._cached_smartdoors_for_update()
+
+        smartdoors = await self.api.get_smartdoors()
+        self._smartdoors_last_refresh_monotonic = now_monotonic
+        self._force_refresh_smartdoors = False
+        return smartdoors
+
+    def _rebuild_smartdoor_schedule_views(
+        self,
+        smartdoors: list[Any],
+        pet_links: PetSafeExtendedPetLinkData,
+        rules_by_door: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]],
+    ) -> tuple[
+        dict[str, PetSafeExtendedSmartDoorScheduleSummary],
+        dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]],
+    ]:
+        """Recompute schedule summaries and per-pet state from cached rules."""
+        previous_summaries = copy_smartdoor_schedule_summaries(self._current_smartdoor_schedule_summaries())
+        previous_pet_schedule_states = copy_smartdoor_pet_schedule_states(self._current_smartdoor_pet_schedule_states())
+        schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
+        pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
+        default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
+        now = dt_util.now().astimezone(default_timezone)
+        current_data = self.data or PetSafeExtendedCoordinatorData()
+
+        for door in smartdoors:
+            door_api_name = cast(str, door.api_name)
+            rules = rules_by_door.get(door_api_name) or current_data.smartdoor_schedule_rules.get(door_api_name)
+            if rules is None:
+                if door_api_name in previous_summaries:
+                    schedule_summaries[door_api_name] = previous_summaries[door_api_name]
+                if door_api_name in previous_pet_schedule_states:
+                    pet_schedule_states[door_api_name] = previous_pet_schedule_states[door_api_name]
+                continue
+
+            linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ())))
+            schedule_summaries[door_api_name] = build_smartdoor_schedule_summary(
+                rules,
+                linked_pet_ids,
+                now=now,
+                default_timezone=default_timezone,
+            )
+            pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
+                rules,
+                linked_pet_ids,
+                door_mode=getattr(door, "mode", None),
+                now=now,
+                default_timezone=default_timezone,
+            )
+
+        return schedule_summaries, pet_schedule_states
+
     async def _async_update_data(self) -> PetSafeExtendedCoordinatorData:
         """Fetch data from the PetSafe API."""
         try:
             async with self._device_lock:
-                feeders = await self.api.get_feeders()
-                litterboxes = await self.api.get_litterboxes()
-                smartdoors = await self.api.get_smartdoors()
-                feeder_details = await self._async_build_feeder_details(feeders)
-                litterbox_details = await self._async_build_litterbox_details(litterboxes)
+                now_monotonic = time.monotonic()
+                feeders = await self._async_get_feeders_for_update(now_monotonic)
+                litterboxes = await self._async_get_litterboxes_for_update(now_monotonic)
+                smartdoors = await self._async_get_smartdoors_for_update(now_monotonic)
+                feeder_details = await self._async_build_feeder_details(feeders, now_monotonic)
+                litterbox_details = await self._async_build_litterbox_details(litterboxes, now_monotonic)
                 pet_links = await self._async_build_pet_links(feeders, litterboxes, smartdoors)
                 (
                     smartdoor_activity_records,
                     smartdoor_pet_states,
                     dispatch_records_by_door,
-                ) = await self._async_build_smartdoor_pet_states(smartdoors, pet_links)
-                (
-                    smartdoor_schedule_rules,
-                    smartdoor_schedule_summaries,
-                    smartdoor_pet_schedule_states,
-                ) = (
-                    await self._async_build_smartdoor_schedule_data(smartdoors, pet_links)
-                    if self._smartdoor_schedules_enabled()
-                    else ({}, {}, {})
-                )
+                ) = await self._async_build_smartdoor_pet_states(smartdoors, pet_links, now_monotonic)
+                smartdoor_schedule_rules = copy_smartdoor_schedule_rules(self._current_smartdoor_schedule_rules())
+                if self._smartdoor_schedules_enabled():
+                    smartdoor_schedule_rules = await self._async_build_smartdoor_schedule_data(
+                        smartdoors,
+                        pet_links,
+                        now_monotonic,
+                    )
+                    smartdoor_schedule_summaries, smartdoor_pet_schedule_states = (
+                        self._rebuild_smartdoor_schedule_views(
+                            smartdoors,
+                            pet_links,
+                            smartdoor_schedule_rules,
+                        )
+                    )
+                else:
+                    smartdoor_schedule_summaries = {}
+                    smartdoor_pet_schedule_states = {}
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
@@ -829,7 +1042,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         now_monotonic = time.monotonic()
 
         if (
-            self._pet_links_last_refresh_monotonic is not None
+            not self._force_refresh_pet_links
+            and self._pet_links_last_refresh_monotonic is not None
             and (now_monotonic - self._pet_links_last_refresh_monotonic) < PET_LINK_REFRESH_INTERVAL.total_seconds()
         ):
             return previous_data
@@ -853,12 +1067,14 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             return previous_data
 
         self._pet_links_last_refresh_monotonic = now_monotonic
+        self._force_refresh_pet_links = False
         return pet_links
 
     async def _async_build_smartdoor_pet_states(
         self,
         smartdoors: list[Any],
         pet_links: PetSafeExtendedPetLinkData,
+        now_monotonic: float,
     ) -> tuple[
         dict[str, tuple[PetSafeExtendedSmartDoorActivityRecord, ...]],
         dict[str, dict[str, PetSafeExtendedSmartDoorPetState]],
@@ -883,11 +1099,20 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
             activity_items: list[dict[str, Any]] = []
             try:
-                since = self._smartdoor_activity_cursor_by_door.get(door_api_name)
-                if since is None:
-                    activity_items = await door.get_activity(limit=SMARTDOOR_ACTIVITY_INITIAL_LIMIT)
+                refresh_due = self._refresh_due(
+                    self._smartdoor_activity_last_refresh_by_door.get(door_api_name),
+                    SMARTDOOR_ACTIVITY_REFRESH_INTERVAL,
+                    now_monotonic,
+                )
+                if refresh_due:
+                    since = self._smartdoor_activity_cursor_by_door.get(door_api_name)
+                    if since is None:
+                        activity_items = await door.get_activity(limit=SMARTDOOR_ACTIVITY_INITIAL_LIMIT)
+                    else:
+                        activity_items = await door.get_activity(since=since)
+                    self._smartdoor_activity_last_refresh_by_door[door_api_name] = now_monotonic
                 else:
-                    activity_items = await door.get_activity(since=since)
+                    since = self._smartdoor_activity_cursor_by_door.get(door_api_name)
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
@@ -926,6 +1151,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         for api_name in tuple(self._smartdoor_activity_cursor_by_door):
             if api_name not in current_door_ids:
                 self._smartdoor_activity_cursor_by_door.pop(api_name, None)
+        self._cleanup_timestamp_map(self._smartdoor_activity_last_refresh_by_door, current_door_ids)
 
         return activity_records, pet_states, dispatch_records_by_door
 
@@ -933,20 +1159,11 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self,
         smartdoors: list[Any],
         pet_links: PetSafeExtendedPetLinkData,
-    ) -> tuple[
-        dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]],
-        dict[str, PetSafeExtendedSmartDoorScheduleSummary],
-        dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]],
-    ]:
-        """Build SmartDoor schedule caches used by calendar and summary entities."""
+        now_monotonic: float,
+    ) -> dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]]:
+        """Refresh SmartDoor schedule rules only when the slow schedule bucket is due."""
         previous_rules = copy_smartdoor_schedule_rules(self._current_smartdoor_schedule_rules())
-        previous_summaries = copy_smartdoor_schedule_summaries(self._current_smartdoor_schedule_summaries())
-        previous_pet_schedule_states = copy_smartdoor_pet_schedule_states(self._current_smartdoor_pet_schedule_states())
         schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
-        schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
-        pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
-
-        default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
 
         for door in smartdoors:
             door_api_name = cast(str, door.api_name)
@@ -957,51 +1174,44 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 pet_names_by_id[pet_id] = profile.name if profile is not None and profile.name else f"Pet {index}"
 
             try:
+                refresh_due = self._refresh_due(
+                    self._smartdoor_schedule_last_refresh_by_door.get(door_api_name),
+                    SMARTDOOR_SCHEDULE_REFRESH_INTERVAL,
+                    now_monotonic,
+                    force=door_api_name in self._force_refresh_smartdoor_schedule_api_names,
+                )
+                if not refresh_due:
+                    if door_api_name in previous_rules:
+                        schedule_rules[door_api_name] = previous_rules[door_api_name]
+                    continue
+
                 schedules = await door.get_schedules()
                 preferences = await door.get_preferences()
+                self._smartdoor_schedule_last_refresh_by_door[door_api_name] = now_monotonic
+                self._force_refresh_smartdoor_schedule_api_names.discard(door_api_name)
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
                 LOGGER.debug("Failed to refresh SmartDoor schedules for %s: %s", door_api_name, err)
                 if door_api_name in previous_rules:
                     schedule_rules[door_api_name] = previous_rules[door_api_name]
-                if door_api_name in previous_summaries:
-                    schedule_summaries[door_api_name] = previous_summaries[door_api_name]
-                if door_api_name in previous_pet_schedule_states:
-                    pet_schedule_states[door_api_name] = previous_pet_schedule_states[door_api_name]
                 continue
             except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
                 LOGGER.debug("Failed to refresh SmartDoor schedules for %s: %s", door_api_name, err)
                 if door_api_name in previous_rules:
                     schedule_rules[door_api_name] = previous_rules[door_api_name]
-                if door_api_name in previous_summaries:
-                    schedule_summaries[door_api_name] = previous_summaries[door_api_name]
-                if door_api_name in previous_pet_schedule_states:
-                    pet_schedule_states[door_api_name] = previous_pet_schedule_states[door_api_name]
                 continue
 
             timezone = cast(str | None, preferences.get("tz")) if isinstance(preferences, dict) else None
-            rules = parse_smartdoor_schedule_rules(
+            schedule_rules[door_api_name] = parse_smartdoor_schedule_rules(
                 schedules if isinstance(schedules, list) else [],
                 timezone=timezone or getattr(door, "timezone", None),
                 pet_names_by_id=pet_names_by_id,
             )
-            schedule_rules[door_api_name] = rules
-            schedule_summaries[door_api_name] = build_smartdoor_schedule_summary(
-                rules,
-                linked_pet_ids,
-                now=dt_util.now().astimezone(default_timezone),
-                default_timezone=default_timezone,
-            )
-            pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
-                rules,
-                linked_pet_ids,
-                door_mode=getattr(door, "mode", None),
-                now=dt_util.now().astimezone(default_timezone),
-                default_timezone=default_timezone,
-            )
-
-        return schedule_rules, schedule_summaries, pet_schedule_states
+        current_door_ids = {cast(str, door.api_name) for door in smartdoors}
+        self._cleanup_timestamp_map(self._smartdoor_schedule_last_refresh_by_door, current_door_ids)
+        self._cleanup_force_refresh_keys(self._force_refresh_smartdoor_schedule_api_names, current_door_ids)
+        return schedule_rules
 
     def _update_live_smartdoor_schedule_state(self, door: Any) -> None:
         """Recompute per-pet schedule state after a live SmartDoor mode refresh."""
@@ -1016,11 +1226,18 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         pet_links = self._current_pet_links()
         linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ()))) if pet_links else ()
         default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
+        now = dt_util.now().astimezone(default_timezone)
         self._smartdoor_pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
             rules,
             linked_pet_ids,
             door_mode=getattr(door, "mode", None),
-            now=dt_util.now().astimezone(default_timezone),
+            now=now,
+            default_timezone=default_timezone,
+        )
+        self._smartdoor_schedule_summaries[door_api_name] = build_smartdoor_schedule_summary(
+            rules,
+            linked_pet_ids,
+            now=now,
             default_timezone=default_timezone,
         )
 
@@ -1040,51 +1257,109 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 for listener in listeners:
                     listener(record)
 
-    async def _async_build_feeder_details(self, feeders: list[Any]) -> dict[str, PetSafeExtendedFeederDetails]:
+    async def _async_build_feeder_details(
+        self,
+        feeders: list[Any],
+        now_monotonic: float,
+    ) -> dict[str, PetSafeExtendedFeederDetails]:
         """Build supplemental feeder state."""
         previous = self.data.feeder_details if self.data else {}
         details: dict[str, PetSafeExtendedFeederDetails] = {}
+        active_feeder_ids = {cast(str, feeder.api_name) for feeder in feeders}
 
         for feeder in feeders:
+            feeder_api_name = cast(str, feeder.api_name)
+            last_feeding = previous.get(feeder_api_name, PetSafeExtendedFeederDetails()).last_feeding
+            schedules = list(self._feeder_schedule_payloads.get(feeder_api_name, ()))
+
+            last_feeding_due = self._refresh_due(
+                self._feeder_last_feeding_last_refresh_by_feeder.get(feeder_api_name),
+                FEEDER_LAST_FEEDING_REFRESH_INTERVAL,
+                now_monotonic,
+                force=feeder_api_name in self._force_refresh_feeder_last_feeding_api_names,
+            )
+            schedules_due = self._refresh_due(
+                self._feeder_schedule_last_refresh_by_feeder.get(feeder_api_name),
+                FEEDER_SCHEDULE_REFRESH_INTERVAL,
+                now_monotonic,
+                force=feeder_api_name in self._force_refresh_feeder_schedule_api_names,
+            )
+
             try:
-                feeding = await feeder.get_last_feeding()
-                schedules = await feeder.get_schedules()
-                details[feeder.api_name] = PetSafeExtendedFeederDetails(
-                    last_feeding=self._parse_feeding_timestamp(feeding),
+                if last_feeding_due:
+                    feeding = await feeder.get_last_feeding()
+                    last_feeding = self._parse_feeding_timestamp(feeding)
+                    self._feeder_last_feeding_last_refresh_by_feeder[feeder_api_name] = now_monotonic
+                    self._force_refresh_feeder_last_feeding_api_names.discard(feeder_api_name)
+
+                if schedules_due:
+                    schedules = await feeder.get_schedules()
+                    cached_schedules = tuple(schedule for schedule in schedules if isinstance(schedule, dict))
+                    self._feeder_schedule_payloads[feeder_api_name] = cached_schedules
+                    schedules = list(cached_schedules)
+                    self._feeder_schedule_last_refresh_by_feeder[feeder_api_name] = now_monotonic
+                    self._force_refresh_feeder_schedule_api_names.discard(feeder_api_name)
+
+                details[feeder_api_name] = PetSafeExtendedFeederDetails(
+                    last_feeding=last_feeding,
                     next_feeding=self._get_next_feeding_time(schedules),
                 )
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
-                LOGGER.debug("Failed to refresh feeder details for %s: %s", feeder.api_name, err)
-                details[feeder.api_name] = previous.get(feeder.api_name, PetSafeExtendedFeederDetails())
+                LOGGER.debug("Failed to refresh feeder details for %s: %s", feeder_api_name, err)
+                details[feeder_api_name] = previous.get(feeder_api_name, PetSafeExtendedFeederDetails())
             except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
-                LOGGER.debug("Failed to refresh feeder details for %s: %s", feeder.api_name, err)
-                details[feeder.api_name] = previous.get(feeder.api_name, PetSafeExtendedFeederDetails())
+                LOGGER.debug("Failed to refresh feeder details for %s: %s", feeder_api_name, err)
+                details[feeder_api_name] = previous.get(feeder_api_name, PetSafeExtendedFeederDetails())
+
+        self._cleanup_timestamp_map(self._feeder_last_feeding_last_refresh_by_feeder, active_feeder_ids)
+        self._cleanup_timestamp_map(self._feeder_schedule_last_refresh_by_feeder, active_feeder_ids)
+        self._cleanup_force_refresh_keys(self._force_refresh_feeder_last_feeding_api_names, active_feeder_ids)
+        self._cleanup_force_refresh_keys(self._force_refresh_feeder_schedule_api_names, active_feeder_ids)
+        for feeder_api_name in tuple(self._feeder_schedule_payloads):
+            if feeder_api_name not in active_feeder_ids:
+                self._feeder_schedule_payloads.pop(feeder_api_name, None)
 
         return details
 
     async def _async_build_litterbox_details(
         self,
         litterboxes: list[Any],
+        now_monotonic: float,
     ) -> dict[str, PetSafeExtendedLitterboxDetails]:
         """Build supplemental litterbox state."""
         previous = self.data.litterbox_details if self.data else {}
         details: dict[str, PetSafeExtendedLitterboxDetails] = {}
+        active_litterbox_ids = {cast(str, litterbox.api_name) for litterbox in litterboxes}
 
         for litterbox in litterboxes:
+            litterbox_api_name = cast(str, litterbox.api_name)
             try:
-                events = await litterbox.get_activity()
-                details[litterbox.api_name] = self._parse_litterbox_activity(litterbox, events)
+                refresh_due = self._refresh_due(
+                    self._litterbox_activity_last_refresh_by_litterbox.get(litterbox_api_name),
+                    LITTERBOX_ACTIVITY_REFRESH_INTERVAL,
+                    now_monotonic,
+                    force=litterbox_api_name in self._force_refresh_litterbox_activity_api_names,
+                )
+                if refresh_due:
+                    events = await litterbox.get_activity()
+                    details[litterbox_api_name] = self._parse_litterbox_activity(litterbox, events)
+                    self._litterbox_activity_last_refresh_by_litterbox[litterbox_api_name] = now_monotonic
+                    self._force_refresh_litterbox_activity_api_names.discard(litterbox_api_name)
+                else:
+                    details[litterbox_api_name] = previous.get(litterbox_api_name, PetSafeExtendedLitterboxDetails())
             except httpx.HTTPStatusError as err:
                 if self._is_auth_error(err):
                     self._raise_auth_failed(err)
-                LOGGER.debug("Failed to refresh litterbox details for %s: %s", litterbox.api_name, err)
-                details[litterbox.api_name] = previous.get(litterbox.api_name, PetSafeExtendedLitterboxDetails())
+                LOGGER.debug("Failed to refresh litterbox details for %s: %s", litterbox_api_name, err)
+                details[litterbox_api_name] = previous.get(litterbox_api_name, PetSafeExtendedLitterboxDetails())
             except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
-                LOGGER.debug("Failed to refresh litterbox details for %s: %s", litterbox.api_name, err)
-                details[litterbox.api_name] = previous.get(litterbox.api_name, PetSafeExtendedLitterboxDetails())
+                LOGGER.debug("Failed to refresh litterbox details for %s: %s", litterbox_api_name, err)
+                details[litterbox_api_name] = previous.get(litterbox_api_name, PetSafeExtendedLitterboxDetails())
 
+        self._cleanup_timestamp_map(self._litterbox_activity_last_refresh_by_litterbox, active_litterbox_ids)
+        self._cleanup_force_refresh_keys(self._force_refresh_litterbox_activity_api_names, active_litterbox_ids)
         return details
 
     @staticmethod

@@ -17,6 +17,7 @@ from custom_components.petsafe_extended.const import (
     SERVICE_FEED,
     SERVICE_MODIFY_SCHEDULE,
     SERVICE_PRIME,
+    SERVICE_REFRESH_PET_LINKS,
 )
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
 from custom_components.petsafe_extended.utils import get_feeders_for_service
@@ -117,6 +118,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 await coordinator.async_prime_feeder(api_name, refresh=False)
             await coordinator.async_request_refresh()
 
+    async def handle_refresh_pet_links(call: ServiceCall) -> None:
+        """Force a pet-link refresh for each loaded PetSafe config entry."""
+        del call
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            runtime_data = getattr(entry, "runtime_data", None)
+            if runtime_data is None:
+                continue
+            await runtime_data.coordinator.async_refresh_pet_links()
+
     services: dict[str, Any] = {
         SERVICE_ADD_SCHEDULE: handle_add_schedule,
         SERVICE_DELETE_SCHEDULE: handle_delete_schedule,
@@ -124,6 +134,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_MODIFY_SCHEDULE: handle_modify_schedule,
         SERVICE_FEED: handle_feed,
         SERVICE_PRIME: handle_prime,
+        SERVICE_REFRESH_PET_LINKS: handle_refresh_pet_links,
     }
 
     for service_name, handler in services.items():

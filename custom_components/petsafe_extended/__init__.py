@@ -37,6 +37,7 @@ _SCHEDULE_ENTITY_UNIQUE_ID_SUFFIXES = {
     "_smart_access",
     "_next_smart_access",
     "_next_smart_access_change",
+    "_refresh_schedule_data",
 }
 
 
@@ -61,7 +62,11 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         platforms.append(Platform.CALENDAR)
     if _entry_has_selected_devices(entry, "feeders"):
         platforms.append(Platform.SWITCH)
-    if _entry_has_selected_devices(entry, "feeders") or _entry_has_selected_devices(entry, "litterboxes"):
+    if (
+        _entry_has_selected_devices(entry, "feeders")
+        or _entry_has_selected_devices(entry, "litterboxes")
+        or (_entry_has_selected_devices(entry, "smartdoors") and schedules_enabled)
+    ):
         platforms.append(Platform.BUTTON)
     if _entry_has_selected_devices(entry, "litterboxes") or _entry_has_selected_devices(entry, "smartdoors"):
         platforms.append(Platform.SELECT)

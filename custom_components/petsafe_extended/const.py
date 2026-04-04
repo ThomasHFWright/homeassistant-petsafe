@@ -1,5 +1,6 @@
 """Constants for the PetSafe Extended integration."""
 
+from datetime import timedelta
 import importlib
 from logging import Logger, getLogger
 from typing import Final
@@ -14,6 +15,15 @@ DEFAULT_UPDATE_INTERVAL_HOURS = 1
 DEFAULT_ENABLE_DEBUGGING = False
 DEFAULT_ENABLE_SMARTDOOR_SCHEDULES = True
 
+COORDINATOR_HEARTBEAT_INTERVAL: Final = timedelta(seconds=30)
+DEVICE_LIST_REFRESH_INTERVAL: Final = timedelta(seconds=60)
+FEEDER_LAST_FEEDING_REFRESH_INTERVAL: Final = timedelta(seconds=60)
+FEEDER_SCHEDULE_REFRESH_INTERVAL: Final = timedelta(minutes=30)
+LITTERBOX_ACTIVITY_REFRESH_INTERVAL: Final = timedelta(seconds=60)
+SMARTDOOR_ACTIVITY_REFRESH_INTERVAL: Final = timedelta(seconds=30)
+SMARTDOOR_SCHEDULE_REFRESH_INTERVAL: Final = timedelta(minutes=30)
+PET_LINK_REFRESH_INTERVAL_HOURS: Final = 6
+
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_ENABLE_SMARTDOOR_SCHEDULES = "enable_smartdoor_schedules"
 MANUFACTURER = "PetSafe"
@@ -26,6 +36,7 @@ SERVICE_DELETE_ALL_SCHEDULES = "delete_all_schedules"
 SERVICE_MODIFY_SCHEDULE = "modify_schedule"
 SERVICE_FEED = "feed"
 SERVICE_PRIME = "prime"
+SERVICE_REFRESH_PET_LINKS = "refresh_pet_links"
 
 ATTR_TIME = "time"
 ATTR_AMOUNT = "amount"
