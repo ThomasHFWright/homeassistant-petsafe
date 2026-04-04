@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from custom_components.petsafe_extended.const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES
+from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DOMAIN,
+)
 from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
 from custom_components.petsafe_extended.utils import filter_selected_devices
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .feeder import FEEDER_SENSOR_DESCRIPTIONS, PetSafeExtendedFeederSensor
@@ -28,13 +33,31 @@ from .smartdoor_schedule import (
 )
 
 
+def _async_update_sensor_entity_categories(hass: HomeAssistant, entities: list[SensorEntity]) -> None:
+    """Apply updated sensor entity categories to existing registry entries."""
+    entity_registry = er.async_get(hass)
+
+    for entity in entities:
+        if entity.entity_category is None or entity.unique_id is None:
+            continue
+
+        entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, entity.unique_id)
+        if entity_id is None:
+            continue
+
+        existing_entry = entity_registry.async_get(entity_id)
+        if existing_entry is None or existing_entry.entity_category == entity.entity_category:
+            continue
+
+        entity_registry.async_update_entity(entity_id, entity_category=entity.entity_category)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    del hass
     coordinator = entry.runtime_data.coordinator
     schedules_enabled = entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES)
 
@@ -92,4 +115,5 @@ async def async_setup_entry(
         )
 
     if entities:
+        _async_update_sensor_entity_categories(hass, entities)
         async_add_entities(entities)

@@ -473,7 +473,7 @@ async def test_smartdoor_diagnostic_sensor_values(coordinator) -> None:
     )
 
     assert battery_entity.native_value == 100
-    assert battery_entity.entity_category is None
+    assert battery_entity.entity_category is EntityCategory.DIAGNOSTIC
     assert voltage_entity.native_value == 5.862
     assert voltage_entity.entity_category is EntityCategory.DIAGNOSTIC
     assert voltage_entity.entity_registry_enabled_default is False
@@ -1210,6 +1210,42 @@ async def test_sensor_platform_skips_smartdoor_schedule_entities_when_disabled(
         "signal_strength",
     }
     assert {entity.entity_description.key for entity in pet_entities} == {"last_seen", "last_activity"}
+
+
+@pytest.mark.asyncio
+async def test_sensor_platform_updates_existing_diagnostic_entity_categories(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Existing SmartDoor diagnostic sensors should migrate into the diagnostic section."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity_reg = er.async_get(hass)
+    existing_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_battery_level",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_battery_level",
+    )
+    assert existing_entry.entity_category is None
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    updated_entry = entity_reg.async_get(existing_entry.entity_id)
+    assert updated_entry is not None
+    assert updated_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio

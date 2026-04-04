@@ -18,6 +18,7 @@ SMARTDOOR_BATTERY_LEVEL_DESCRIPTION = SensorEntityDescription(
     translation_key="battery_level",
     device_class=SensorDeviceClass.BATTERY,
     native_unit_of_measurement=PERCENTAGE,
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 SMARTDOOR_BATTERY_VOLTAGE_DESCRIPTION = SensorEntityDescription(
