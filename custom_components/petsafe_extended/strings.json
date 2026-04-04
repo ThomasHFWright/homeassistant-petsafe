@@ -59,6 +59,9 @@
       "refresh_feeding_schedule_data": {
         "name": "Refresh Schedule Data"
       },
+      "refresh_pet_data": {
+        "name": "Refresh Pet Data"
+      },
       "refresh_schedule_data": {
         "name": "Refresh Schedule Data"
       }

@@ -47,6 +47,21 @@ _DIAGNOSTIC_ENTITY_CATEGORY_BY_UNIQUE_ID_SUFFIX = {
     "_ac_power": EntityCategory.DIAGNOSTIC,
     "_problem": EntityCategory.DIAGNOSTIC,
 }
+_SMARTDOOR_PET_ENTITY_UNIQUE_ID_SUFFIX_TO_DOMAIN = {
+    "_last_seen": "sensor",
+    "_last_activity": "sensor",
+    "_smart_access": "sensor",
+    "_next_smart_access": "sensor",
+    "_next_smart_access_change": "sensor",
+    "_schedule": "calendar",
+    "_activity": "event",
+}
+_SMARTDOOR_SCHEDULE_PET_ENTITY_UNIQUE_ID_SUFFIXES = {
+    "_smart_access",
+    "_next_smart_access",
+    "_next_smart_access_change",
+    "_schedule",
+}
 
 
 def _entry_has_selected_devices(entry: ConfigEntry, key: str) -> bool:
@@ -104,6 +119,36 @@ def _async_remove_schedule_entities(hass: HomeAssistant, entry: ConfigEntry) -> 
     for entity_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         if _is_schedule_entity_unique_id(entity_entry.unique_id):
             entity_reg.async_remove(entity_entry.entity_id)
+
+
+def _async_remove_smartdoor_pet_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    pet_ids_by_door: dict[str, set[str] | tuple[str, ...]],
+    *,
+    schedule_only: bool = False,
+) -> None:
+    """Remove SmartDoor pet-derived entities for the provided doors and pets."""
+    entity_reg = er.async_get(hass)
+    suffix_to_domain = {
+        suffix: domain
+        for suffix, domain in _SMARTDOOR_PET_ENTITY_UNIQUE_ID_SUFFIX_TO_DOMAIN.items()
+        if not schedule_only or suffix in _SMARTDOOR_SCHEDULE_PET_ENTITY_UNIQUE_ID_SUFFIXES
+    }
+
+    for door_api_name, pet_ids in pet_ids_by_door.items():
+        for pet_id in pet_ids:
+            for suffix, domain in suffix_to_domain.items():
+                unique_id = f"{door_api_name}_{pet_id}{suffix}"
+                entity_id = entity_reg.async_get_entity_id(domain, DOMAIN, unique_id)
+                if entity_id is None:
+                    continue
+
+                entity_entry = entity_reg.async_get(entity_id)
+                if entity_entry is None or entity_entry.config_entry_id != entry.entry_id:
+                    continue
+
+                entity_reg.async_remove(entity_id)
 
 
 def _async_update_diagnostic_entity_categories(hass: HomeAssistant, entry: ConfigEntry) -> None:
