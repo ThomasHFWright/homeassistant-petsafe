@@ -125,3 +125,13 @@ class PetSafeExtendedSmartDoorPetSensor(SensorEntity, PetSafeExtendedSmartDoorPe
             "next_change_at": schedule_state.next_change_at,
         }
         return {key: value for key, value in attributes.items() if value not in (None, [], ())}
+
+    def _pet_ids_for_availability(self) -> tuple[str, ...]:
+        """Return the pet identifiers that should keep this sensor available."""
+        if self.entity_description.key in {
+            SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION.key,
+            SMARTDOOR_PET_NEXT_SMART_ACCESS_DESCRIPTION.key,
+            SMARTDOOR_PET_NEXT_SMART_ACCESS_CHANGE_DESCRIPTION.key,
+        }:
+            return self.coordinator.get_smartdoor_scheduled_pet_ids(self._api_name)
+        return super()._pet_ids_for_availability()
