@@ -23,6 +23,7 @@ SMARTDOOR_AC_POWER_DESCRIPTION = BinarySensorEntityDescription(
     name="AC Power",
     translation_key="ac_power",
     device_class=BinarySensorDeviceClass.PLUG,
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 SMARTDOOR_PROBLEM_DESCRIPTION = BinarySensorEntityDescription(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
@@ -39,6 +39,13 @@ _SCHEDULE_ENTITY_UNIQUE_ID_SUFFIXES = {
     "_next_smart_access",
     "_next_smart_access_change",
     "_refresh_schedule_data",
+}
+_DIAGNOSTIC_ENTITY_CATEGORY_BY_UNIQUE_ID_SUFFIX = {
+    "_battery_level": EntityCategory.DIAGNOSTIC,
+    "_battery_voltage": EntityCategory.DIAGNOSTIC,
+    "_signal_strength": EntityCategory.DIAGNOSTIC,
+    "_ac_power": EntityCategory.DIAGNOSTIC,
+    "_problem": EntityCategory.DIAGNOSTIC,
 }
 
 
@@ -97,6 +104,28 @@ def _async_remove_schedule_entities(hass: HomeAssistant, entry: ConfigEntry) -> 
     for entity_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         if _is_schedule_entity_unique_id(entity_entry.unique_id):
             entity_reg.async_remove(entity_entry.entity_id)
+
+
+def _async_update_diagnostic_entity_categories(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Apply diagnostic entity categories to existing SmartDoor registry entries."""
+    entity_reg = er.async_get(hass)
+    for entity_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
+        unique_id = entity_entry.unique_id
+        if unique_id is None:
+            continue
+
+        entity_category = next(
+            (
+                category
+                for suffix, category in _DIAGNOSTIC_ENTITY_CATEGORY_BY_UNIQUE_ID_SUFFIX.items()
+                if unique_id.endswith(suffix)
+            ),
+            None,
+        )
+        if entity_category is None or entity_entry.entity_category == entity_category:
+            continue
+
+        entity_reg.async_update_entity(entity_entry.entity_id, entity_category=entity_category)
 
 
 async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -162,6 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     typed_entry.async_on_unload(typed_entry.add_update_listener(_async_handle_entry_update))
 
     await coordinator.async_config_entry_first_refresh()
+    _async_update_diagnostic_entity_categories(hass, typed_entry)
     if not schedules_enabled:
         _async_remove_schedule_entities(hass, typed_entry)
 

@@ -503,6 +503,7 @@ async def test_smartdoor_binary_sensor_values(coordinator) -> None:
     )
 
     assert ac_power_entity.is_on is False
+    assert ac_power_entity.entity_category is EntityCategory.DIAGNOSTIC
     assert problem_entity.is_on is False
     assert problem_entity.extra_state_attributes == {"error_state": "NONE"}
 
@@ -535,6 +536,38 @@ async def test_binary_sensor_platform_setup_adds_smartdoor_entities(
     assert len(added_entities) == 2
     assert all(isinstance(entity, PetSafeExtendedSmartDoorBinarySensor) for entity in added_entities)
     assert {entity.entity_description.key for entity in added_entities} == {"ac_power", "problem"}
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_platform_updates_existing_diagnostic_entity_categories(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Existing SmartDoor binary sensors should migrate into the diagnostic section."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity_reg = er.async_get(hass)
+    existing_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_ac_power",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_ac_power",
+    )
+    assert existing_entry.entity_category is None
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_binary_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    updated_entry = entity_reg.async_get(existing_entry.entity_id)
+    assert updated_entry is not None
+    assert updated_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio
@@ -2007,6 +2040,39 @@ def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, m
     assert entity_reg.async_get(schedule_sensor_entry.entity_id) is None
     assert entity_reg.async_get(refresh_button_entry.entity_id) is None
     assert entity_reg.async_get(activity_entry.entity_id) is not None
+
+
+def test_update_diagnostic_entity_categories_updates_existing_registry_entries(hass, mock_config_entry) -> None:
+    """Diagnostic SmartDoor entities should move into the diagnostic section on existing installs."""
+    mock_config_entry.add_to_hass(hass)
+    entity_reg = er.async_get(hass)
+
+    ac_power_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_ac_power",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_ac_power",
+    )
+    battery_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_battery_level",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_battery_level",
+    )
+
+    assert ac_power_entry.entity_category is None
+    assert battery_entry.entity_category is None
+
+    integration_module._async_update_diagnostic_entity_categories(hass, mock_config_entry)  # noqa: SLF001
+
+    updated_ac_power_entry = entity_reg.async_get(ac_power_entry.entity_id)
+    updated_battery_entry = entity_reg.async_get(battery_entry.entity_id)
+    assert updated_ac_power_entry is not None
+    assert updated_battery_entry is not None
+    assert updated_ac_power_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_battery_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio
