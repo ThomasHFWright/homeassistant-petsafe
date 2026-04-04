@@ -18,6 +18,11 @@ refresh controls.
 
 The integration uses the [`petsafe-api`](https://pypi.org/project/petsafe-api) Python package for cloud access.
 
+## Requirements
+
+- Home Assistant `2025.12.3` or newer for this integration
+- Home Assistant `2026.3` or newer for the locally shipped `brand/` icon and logo support
+
 ## Highlights
 
 - One config flow for PetSafe cloud login using an emailed confirmation code
