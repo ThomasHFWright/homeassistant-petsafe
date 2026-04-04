@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from custom_components.petsafe_extended.api import async_list_pet_products, async_list_pets
-from custom_components.petsafe_extended.const import LOGGER
+from custom_components.petsafe_extended.const import LOGGER, PET_LINK_REFRESH_INTERVAL_HOURS
 from custom_components.petsafe_extended.data import (
     PetSafeExtendedPetLinkData,
     PetSafeExtendedPetProductLink,
@@ -22,7 +22,7 @@ from homeassistant.util import dt as dt_util
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
-PET_LINK_REFRESH_INTERVAL = timedelta(hours=6)
+PET_LINK_REFRESH_INTERVAL = timedelta(hours=PET_LINK_REFRESH_INTERVAL_HOURS)
 
 _PET_ID_KEYS = ("petId", "petID", "id")
 _PET_ID_ATTRS = ("pet_id", "id")

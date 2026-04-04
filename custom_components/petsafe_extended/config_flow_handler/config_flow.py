@@ -10,10 +10,15 @@ from botocore.exceptions import ParamValidationError
 import voluptuous as vol
 
 from custom_components.petsafe_extended.api import async_create_auth_client, async_import_petsafe
-from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
+from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    CONF_REFRESH_TOKEN,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DOMAIN,
+)
 from custom_components.petsafe_extended.utils.auth import build_account_unique_id
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_BASE, CONF_CODE, CONF_EMAIL, CONF_TOKEN
 import homeassistant.helpers.config_validation as cv
 from homeassistant.requirements import RequirementsNotFound
@@ -22,6 +27,21 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_EMAIL): str})
 STEP_CODE_DATA_SCHEMA = vol.Schema({vol.Required(CONF_CODE): str})
+
+
+def _build_options_schema(config_entry: ConfigEntry) -> vol.Schema:
+    """Return the options schema for PetSafe Extended."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_ENABLE_SMARTDOOR_SCHEDULES,
+                default=config_entry.options.get(
+                    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+                    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+                ),
+            ): bool,
+        }
+    )
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -40,6 +60,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._feeders: dict[str, str] | None = None
         self._litterboxes: dict[str, str] | None = None
         self._smartdoors: dict[str, str] | None = None
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> PetSafeExtendedOptionsFlow:
+        """Return the PetSafe Extended options flow."""
+        return PetSafeExtendedOptionsFlow(config_entry)
 
     async def _async_get_petsafe(self) -> Any:
         """Ensure the petsafe dependency is installed before importing it."""
@@ -203,4 +228,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._smartdoors = {device.api_name: device.friendly_name for device in await self._client.get_smartdoors()}
 
 
-__all__ = ["ConfigFlow"]
+class PetSafeExtendedOptionsFlow(config_entries.OptionsFlow):
+    """Options flow for PetSafe Extended."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize the options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage PetSafe Extended options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_build_options_schema(self._config_entry),
+        )
+
+
+__all__ = ["ConfigFlow", "PetSafeExtendedOptionsFlow"]

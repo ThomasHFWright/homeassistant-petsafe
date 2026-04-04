@@ -37,7 +37,24 @@
             }
         }
     },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "enable_smartdoor_schedules": "Enable SmartDoor schedules"
+                }
+            }
+        }
+    },
     "entity": {
+        "button": {
+            "refresh_feeding_schedule_data": {
+                "name": "Refresh Schedule Data"
+            },
+            "refresh_schedule_data": {
+                "name": "Refresh Schedule Data"
+            }
+        },
         "calendar": {
             "schedule": {
                 "name": "Schedule"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from custom_components.petsafe_extended.const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES
 from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
 from custom_components.petsafe_extended.utils import filter_selected_devices
 from homeassistant.components.calendar import CalendarEntity
@@ -19,6 +20,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up the calendar platform."""
     del hass
+    if not entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES):
+        return
+
     coordinator = entry.runtime_data.coordinator
 
     try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from custom_components.petsafe_extended.const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES
 from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
 from custom_components.petsafe_extended.utils import filter_selected_devices
 from homeassistant.components.sensor import SensorEntity
@@ -34,6 +35,7 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     del hass
     coordinator = entry.runtime_data.coordinator
+    schedules_enabled = entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES)
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
@@ -61,19 +63,27 @@ async def async_setup_entry(
         for description in (
             SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
             SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
-            SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
-            SMARTDOOR_PET_NEXT_SMART_ACCESS_DESCRIPTION,
-            SMARTDOOR_PET_NEXT_SMART_ACCESS_CHANGE_DESCRIPTION,
         )
     )
-    entities.extend(
-        PetSafeExtendedSmartDoorScheduleSensor(coordinator, smartdoor, description)
-        for smartdoor in smartdoors
-        for description in (
-            SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
-            SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
+    if schedules_enabled:
+        entities.extend(
+            PetSafeExtendedSmartDoorPetSensor(coordinator, smartdoor, pet_id, description)
+            for smartdoor in smartdoors
+            for pet_id in coordinator.get_smartdoor_pet_ids(smartdoor.api_name)
+            for description in (
+                SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
+                SMARTDOOR_PET_NEXT_SMART_ACCESS_DESCRIPTION,
+                SMARTDOOR_PET_NEXT_SMART_ACCESS_CHANGE_DESCRIPTION,
+            )
         )
-    )
+        entities.extend(
+            PetSafeExtendedSmartDoorScheduleSensor(coordinator, smartdoor, description)
+            for smartdoor in smartdoors
+            for description in (
+                SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
+                SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
+            )
+        )
 
     if entities:
         async_add_entities(entities)
