@@ -22,18 +22,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the button platform."""
-    del hass
     coordinator = entry.runtime_data.coordinator
     schedules_enabled = entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES)
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
-        smartdoors = (
-            filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
-            if schedules_enabled
-            else []
-        )
+        smartdoors = filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
     except ConfigEntryAuthFailed:
         raise
     except Exception as err:
@@ -54,12 +49,12 @@ async def async_setup_entry(
         for litterbox in litterboxes
         for description in LITTERBOX_BUTTON_DESCRIPTIONS
     )
-    if schedules_enabled:
-        entities.extend(
-            PetSafeExtendedSmartDoorRefreshButton(coordinator, smartdoor, description)
-            for smartdoor in smartdoors
-            for description in SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS
-        )
+    entities.extend(
+        PetSafeExtendedSmartDoorRefreshButton(coordinator, smartdoor, description)
+        for smartdoor in smartdoors
+        for description in SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS
+        if schedules_enabled or description.key != "refresh_schedule_data"
+    )
 
     if entities:
         async_add_entities(entities)

@@ -47,9 +47,20 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "ac_power": {
+        "name": "AC Power"
+      },
+      "problem": {
+        "name": "Problem"
+      }
+    },
     "button": {
       "refresh_feeding_schedule_data": {
         "name": "Refresh Schedule Data"
+      },
+      "refresh_pet_data": {
+        "name": "Refresh Pet Data"
       },
       "refresh_schedule_data": {
         "name": "Refresh Schedule Data"
@@ -91,6 +102,15 @@
       }
     },
     "sensor": {
+      "battery_level": {
+        "name": "Battery Level"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "signal_strength": {
+        "name": "Signal Strength"
+      },
       "schedule_rule_count": {
         "name": "Schedule Rule Count"
       },

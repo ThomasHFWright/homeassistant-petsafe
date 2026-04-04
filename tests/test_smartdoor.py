@@ -14,9 +14,18 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import petsafe_extended as integration_module
+from custom_components.petsafe_extended.binary_sensor import async_setup_entry as async_setup_binary_sensor_entry
+from custom_components.petsafe_extended.binary_sensor.smartdoor import (
+    SMARTDOOR_AC_POWER_DESCRIPTION,
+    SMARTDOOR_PROBLEM_DESCRIPTION,
+    PetSafeExtendedSmartDoorBinarySensor,
+)
 from custom_components.petsafe_extended.button import async_setup_entry as async_setup_button_entry
 from custom_components.petsafe_extended.button.feeder_refresh import PetSafeExtendedFeederRefreshButton
-from custom_components.petsafe_extended.button.smartdoor_refresh import PetSafeExtendedSmartDoorRefreshButton
+from custom_components.petsafe_extended.button.smartdoor_refresh import (
+    SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS,
+    PetSafeExtendedSmartDoorRefreshButton,
+)
 from custom_components.petsafe_extended.calendar import async_setup_entry as async_setup_calendar_entry
 from custom_components.petsafe_extended.calendar.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleCalendar
 from custom_components.petsafe_extended.const import (
@@ -73,7 +82,17 @@ from custom_components.petsafe_extended.select.smartdoor_operating_mode import (
     PetSafeExtendedSmartDoorOperatingModeSelect,
 )
 from custom_components.petsafe_extended.sensor import async_setup_entry as async_setup_sensor_entry
-from custom_components.petsafe_extended.sensor.smartdoor_pet import PetSafeExtendedSmartDoorPetSensor
+from custom_components.petsafe_extended.sensor.smartdoor_diagnostic import (
+    SMARTDOOR_BATTERY_LEVEL_DESCRIPTION,
+    SMARTDOOR_BATTERY_VOLTAGE_DESCRIPTION,
+    SMARTDOOR_SIGNAL_STRENGTH_DESCRIPTION,
+    PetSafeExtendedSmartDoorDiagnosticSensor,
+)
+from custom_components.petsafe_extended.sensor.smartdoor_pet import (
+    SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
+    SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
+    PetSafeExtendedSmartDoorPetSensor,
+)
 from custom_components.petsafe_extended.sensor.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleSensor
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -89,6 +108,10 @@ def _create_smartdoor(
     final_act: str | None = SMARTDOOR_FINAL_ACT_UNLOCKED,
     connection_status: str | None = "online",
     battery_level: int | None = 75,
+    battery_voltage: float | None = 12.3,
+    rssi: int | None = -40,
+    has_adapter: bool | None = False,
+    error_state: str | None = None,
 ) -> Any:
     """Construct a SmartDoor device stub with async methods."""
     door = SimpleNamespace()
@@ -109,11 +132,11 @@ def _create_smartdoor(
     door.firmware = "1.0.0"
     door.mode = mode
     door.latch_state = latch_state
-    door.error_state = None
-    door.has_adapter = False
+    door.error_state = error_state
+    door.has_adapter = has_adapter
     door.connection_status = connection_status
-    door.battery_voltage = 12.3
-    door.rssi = -40
+    door.battery_voltage = battery_voltage
+    door.rssi = rssi
     door.battery_level = battery_level
     door.lock = AsyncMock()
     door.unlock = AsyncMock()
@@ -428,6 +451,130 @@ async def test_lock_platform_setup_handles_failure(hass, mock_config_entry, atta
         pytest.raises(ConfigEntryNotReady),
     ):
         await async_setup_entry(hass, mock_config_entry, MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_diagnostic_sensor_values(coordinator) -> None:
+    """SmartDoor diagnostic sensors should normalize current door telemetry."""
+    door = _create_smartdoor(
+        battery_level=100,
+        battery_voltage=5862,
+        rssi=-40,
+    )
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    battery_entity = PetSafeExtendedSmartDoorDiagnosticSensor(
+        coordinator,
+        door,
+        SMARTDOOR_BATTERY_LEVEL_DESCRIPTION,
+    )
+    voltage_entity = PetSafeExtendedSmartDoorDiagnosticSensor(
+        coordinator,
+        door,
+        SMARTDOOR_BATTERY_VOLTAGE_DESCRIPTION,
+    )
+    signal_entity = PetSafeExtendedSmartDoorDiagnosticSensor(
+        coordinator,
+        door,
+        SMARTDOOR_SIGNAL_STRENGTH_DESCRIPTION,
+    )
+
+    assert battery_entity.native_value == 100
+    assert battery_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert voltage_entity.native_value == 5.862
+    assert voltage_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert voltage_entity.entity_registry_enabled_default is False
+    assert signal_entity.native_value == -40
+    assert signal_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert signal_entity.entity_registry_enabled_default is False
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_binary_sensor_values(coordinator) -> None:
+    """SmartDoor binary sensors should expose AC power and problem state."""
+    door = _create_smartdoor(
+        has_adapter=False,
+        error_state="NONE",
+    )
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    ac_power_entity = PetSafeExtendedSmartDoorBinarySensor(
+        coordinator,
+        door,
+        SMARTDOOR_AC_POWER_DESCRIPTION,
+    )
+    problem_entity = PetSafeExtendedSmartDoorBinarySensor(
+        coordinator,
+        door,
+        SMARTDOOR_PROBLEM_DESCRIPTION,
+    )
+
+    assert ac_power_entity.is_on is False
+    assert ac_power_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert problem_entity.is_on is False
+    assert problem_entity.extra_state_attributes == {"error_state": "NONE"}
+
+    door.has_adapter = True
+    door.error_state = "SENSOR_BLOCKED"
+
+    assert ac_power_entity.is_on is True
+    assert problem_entity.is_on is True
+    assert problem_entity.extra_state_attributes == {"error_state": "SENSOR_BLOCKED"}
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_platform_setup_adds_smartdoor_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """The binary sensor platform should add SmartDoor diagnostic entities."""
+    door = _create_smartdoor()
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_binary_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+    assert len(added_entities) == 2
+    assert all(isinstance(entity, PetSafeExtendedSmartDoorBinarySensor) for entity in added_entities)
+    assert {entity.entity_description.key for entity in added_entities} == {"ac_power", "problem"}
+
+
+@pytest.mark.asyncio
+async def test_binary_sensor_platform_updates_existing_diagnostic_entity_categories(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Existing SmartDoor binary sensors should migrate into the diagnostic section."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity_reg = er.async_get(hass)
+    existing_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_ac_power",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_ac_power",
+    )
+    assert existing_entry.entity_category is None
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_binary_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    updated_entry = entity_reg.async_get(existing_entry.entity_id)
+    assert updated_entry is not None
+    assert updated_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio
@@ -948,6 +1095,32 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
                 scheduled_pet_count=2,
             )
         },
+        smartdoor_schedule_rules={
+            "door-1": (
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="pet-1-rule",
+                    title="Cats outside",
+                    start_time="08:00",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    is_enabled=True,
+                    pet_ids=("pet-1",),
+                    pet_names=("Milo",),
+                    pet_count=1,
+                ),
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="pet-2-rule",
+                    title="Cats in at night",
+                    start_time="19:30",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS,
+                    is_enabled=True,
+                    pet_ids=("pet-2",),
+                    pet_names=("Pet 2",),
+                    pet_count=1,
+                ),
+            )
+        },
         smartdoor_pet_schedule_states={
             "door-1": {
                 "pet-1": PetSafeExtendedSmartDoorPetScheduleState(
@@ -981,13 +1154,22 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
 
-    assert len(added_entities) == 12
+    assert len(added_entities) == 15
+    diagnostic_entities = [
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorDiagnosticSensor)
+    ]
     pet_entities = [entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorPetSensor)]
     schedule_entities = [
         entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorScheduleSensor)
     ]
+    assert len(diagnostic_entities) == 3
     assert len(pet_entities) == 10
     assert len(schedule_entities) == 2
+    assert {entity.entity_description.key for entity in diagnostic_entities} == {
+        "battery_level",
+        "battery_voltage",
+        "signal_strength",
+    }
     activity_entities = [entity for entity in pet_entities if entity.entity_description.key == "last_activity"]
     access_entities = [entity for entity in pet_entities if entity.entity_description.key == "smart_access"]
     next_access_entities = [entity for entity in pet_entities if entity.entity_description.key == "next_smart_access"]
@@ -1081,9 +1263,95 @@ async def test_sensor_platform_skips_smartdoor_schedule_entities_when_disabled(
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
 
-    assert len(added_entities) == 4
-    assert all(isinstance(entity, PetSafeExtendedSmartDoorPetSensor) for entity in added_entities)
-    assert {entity.entity_description.key for entity in added_entities} == {"last_seen", "last_activity"}
+    assert len(added_entities) == 7
+    diagnostic_entities = [
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorDiagnosticSensor)
+    ]
+    pet_entities = [entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorPetSensor)]
+    assert len(diagnostic_entities) == 3
+    assert len(pet_entities) == 4
+    assert {entity.entity_description.key for entity in diagnostic_entities} == {
+        "battery_level",
+        "battery_voltage",
+        "signal_strength",
+    }
+    assert {entity.entity_description.key for entity in pet_entities} == {"last_seen", "last_activity"}
+
+
+@pytest.mark.asyncio
+async def test_schedule_pet_sensor_availability_uses_scheduled_pet_membership(coordinator) -> None:
+    """Schedule-derived pet sensors should go unavailable when the pet is no longer scheduled."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_schedule_rules={},
+        smartdoor_pet_schedule_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetScheduleState(
+                    smart_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    effective_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                )
+            }
+        },
+    )
+
+    schedule_entity = PetSafeExtendedSmartDoorPetSensor(
+        coordinator,
+        door,
+        "pet-1",
+        SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
+    )
+    activity_entity = PetSafeExtendedSmartDoorPetSensor(
+        coordinator,
+        door,
+        "pet-1",
+        SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
+    )
+
+    assert schedule_entity.available is False
+    assert activity_entity.available is True
+
+
+@pytest.mark.asyncio
+async def test_sensor_platform_updates_existing_diagnostic_entity_categories(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Existing SmartDoor diagnostic sensors should migrate into the diagnostic section."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    entity_reg = er.async_get(hass)
+    existing_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_battery_level",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_battery_level",
+    )
+    assert existing_entry.entity_category is None
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    updated_entry = entity_reg.async_get(existing_entry.entity_id)
+    assert updated_entry is not None
+    assert updated_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio
@@ -1189,7 +1457,14 @@ async def test_button_platform_adds_schedule_refresh_buttons(
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
     assert any(isinstance(entity, PetSafeExtendedFeederRefreshButton) for entity in added_entities)
-    assert any(isinstance(entity, PetSafeExtendedSmartDoorRefreshButton) for entity in added_entities)
+    smartdoor_refresh_entities = [
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorRefreshButton)
+    ]
+    assert len(smartdoor_refresh_entities) == 2
+    assert {entity.entity_description.key for entity in smartdoor_refresh_entities} == {
+        "refresh_pet_data",
+        "refresh_schedule_data",
+    }
 
 
 @pytest.mark.asyncio
@@ -1222,7 +1497,177 @@ async def test_button_platform_skips_smartdoor_schedule_refresh_button_when_disa
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
     assert any(isinstance(entity, PetSafeExtendedFeederRefreshButton) for entity in added_entities)
-    assert not any(isinstance(entity, PetSafeExtendedSmartDoorRefreshButton) for entity in added_entities)
+    smartdoor_refresh_entities = [
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorRefreshButton)
+    ]
+    assert len(smartdoor_refresh_entities) == 1
+    assert smartdoor_refresh_entities[0].entity_description.key == "refresh_pet_data"
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_pet_refresh_button_reloads_pet_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Refreshing pet data should prune stale pet entities before reloading the entry."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+    )
+
+    async def _refresh_pet_links() -> None:
+        coordinator.data = PetSafeExtendedCoordinatorData(
+            smartdoors=[door],
+            pet_links=PetSafeExtendedPetLinkData(
+                pet_ids_by_product_id={"door-1": ("pet-2",)},
+                product_ids_by_pet_id={"pet-2": ("door-1",)},
+                pets_by_id={"pet-2": PetSafeExtendedPetProfile(pet_id="pet-2", name="Ruby")},
+                product_type_by_product_id={"door-1": "smartdoor"},
+            ),
+        )
+
+    coordinator.async_refresh_pet_links = AsyncMock(side_effect=_refresh_pet_links)
+    pet_button_description = next(
+        description for description in SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS if description.key == "refresh_pet_data"
+    )
+    entity = PetSafeExtendedSmartDoorRefreshButton(coordinator, door, pet_button_description)
+    entity.hass = hass
+
+    entity_reg = er.async_get(hass)
+    last_activity_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_pet-1_last_activity",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_last_activity",
+    )
+    schedule_entry = entity_reg.async_get_or_create(
+        "calendar",
+        DOMAIN,
+        "door-1_pet-1_schedule",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_schedule",
+    )
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)) as mock_reload:
+        await entity.async_press()
+
+    coordinator.async_refresh_pet_links.assert_awaited_once()
+    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+    assert entity_reg.async_get(last_activity_entry.entity_id) is None
+    assert entity_reg.async_get(schedule_entry.entity_id) is None
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_schedule_refresh_button_reloads_schedule_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Refreshing schedule data should prune stale schedule entities before reloading the entry."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1", "pet-2")},
+            product_ids_by_pet_id={"pet-1": ("door-1",), "pet-2": ("door-1",)},
+            pets_by_id={
+                "pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo"),
+                "pet-2": PetSafeExtendedPetProfile(pet_id="pet-2", name="Ruby"),
+            },
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_schedule_rules={
+            "door-1": (
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="milo-only",
+                    title="Milo only",
+                    start_time="08:00",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    is_enabled=True,
+                    pet_ids=("pet-1",),
+                    pet_names=("Milo",),
+                    pet_count=1,
+                ),
+            )
+        },
+    )
+
+    async def _refresh_schedule_data(_: str) -> None:
+        coordinator.data = PetSafeExtendedCoordinatorData(
+            smartdoors=[door],
+            pet_links=coordinator.data.pet_links,
+            smartdoor_schedule_rules={
+                "door-1": (
+                    PetSafeExtendedSmartDoorScheduleRule(
+                        schedule_id="ruby-only",
+                        title="Ruby only",
+                        start_time="09:00",
+                        day_of_week="1111111",
+                        access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                        is_enabled=True,
+                        pet_ids=("pet-2",),
+                        pet_names=("Ruby",),
+                        pet_count=1,
+                    ),
+                )
+            },
+        )
+
+    coordinator.async_refresh_smartdoor_schedule_data = AsyncMock(side_effect=_refresh_schedule_data)
+    schedule_button_description = next(
+        description
+        for description in SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS
+        if description.key == "refresh_schedule_data"
+    )
+    entity = PetSafeExtendedSmartDoorRefreshButton(coordinator, door, schedule_button_description)
+    entity.hass = hass
+
+    entity_reg = er.async_get(hass)
+    old_schedule_entry = entity_reg.async_get_or_create(
+        "calendar",
+        DOMAIN,
+        "door-1_pet-1_schedule",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_schedule",
+    )
+    old_access_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_pet-1_smart_access",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_smart_access",
+    )
+    old_activity_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_pet-1_last_activity",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_last_activity",
+    )
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)) as mock_reload:
+        await entity.async_press()
+
+    coordinator.async_refresh_smartdoor_schedule_data.assert_awaited_once_with("door-1")
+    mock_reload.assert_awaited_once_with(mock_config_entry.entry_id)
+    assert entity_reg.async_get(old_schedule_entry.entity_id) is None
+    assert entity_reg.async_get(old_access_entry.entity_id) is None
+    assert entity_reg.async_get(old_activity_entry.entity_id) is not None
 
 
 @pytest.mark.asyncio
@@ -1307,6 +1752,152 @@ async def test_smartdoor_schedule_calendar_exposes_upcoming_events(coordinator, 
     assert events[1].end.isoformat() == "2026-04-03T19:30:00+01:00"
     assert events[2].start.isoformat() == "2026-04-03T19:30:00+01:00"
     assert events[2].end.isoformat() == "2026-04-04T00:00:00+01:00"
+
+
+@pytest.mark.asyncio
+async def test_sensor_platform_dynamically_adds_new_pet_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Background pet-link refreshes should add new pet sensors without reloading the entry."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_sensor_entry(hass, mock_config_entry, async_add_entities)
+
+    assert async_add_entities.call_count == 1
+    async_add_entities.reset_mock()
+
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_pet_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetState(
+                    last_activity=SMARTDOOR_PET_ACTIVITY_UNKNOWN,
+                )
+            }
+        },
+    )
+
+    coordinator.async_update_listeners()
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+    assert {entity.unique_id for entity in added_entities} == {
+        "door-1_pet-1_last_seen",
+        "door-1_pet-1_last_activity",
+    }
+
+
+@pytest.mark.asyncio
+async def test_calendar_platform_dynamically_adds_new_scheduled_pet_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Background schedule refreshes should add new pet calendars without reloading the entry."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_calendar_entry(hass, mock_config_entry, async_add_entities)
+
+    async_add_entities.assert_not_called()
+
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_schedule_rules={
+            "door-1": (
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="pet-1-rule",
+                    title="Cats outside",
+                    start_time="08:00",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    is_enabled=True,
+                    pet_ids=("pet-1",),
+                    pet_names=("Milo",),
+                    pet_count=1,
+                ),
+            )
+        },
+    )
+
+    coordinator.async_update_listeners()
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+    assert len(added_entities) == 1
+    assert isinstance(added_entities[0], PetSafeExtendedSmartDoorScheduleCalendar)
+    assert added_entities[0].unique_id == "door-1_pet-1_schedule"
+
+
+@pytest.mark.asyncio
+async def test_event_platform_dynamically_adds_new_pet_entities(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Background pet-link refreshes should add per-pet activity events without reloading the entry."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_event_entry(hass, mock_config_entry, async_add_entities)
+
+    assert async_add_entities.call_count == 1
+    door_entities = async_add_entities.call_args[0][0]
+    assert len(door_entities) == 1
+    assert isinstance(door_entities[0], PetSafeExtendedSmartDoorActivityEvent)
+    async_add_entities.reset_mock()
+
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+    )
+
+    coordinator.async_update_listeners()
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+    assert len(added_entities) == 1
+    assert isinstance(added_entities[0], PetSafeExtendedSmartDoorActivityEvent)
+    assert added_entities[0].unique_id == "door-1_pet-1_activity"
 
 
 def test_smartdoor_schedule_intervals_and_description() -> None:
@@ -1761,7 +2352,7 @@ async def test_diagnostics_do_not_expose_pet_link_identifiers(
 
 @pytest.mark.asyncio
 async def test_entry_platforms_include_sensor_for_smartdoor_only(mock_config_entry) -> None:
-    """SmartDoor-only entries should now load sensor, calendar, button, select, event, and lock platforms."""
+    """SmartDoor-only entries should now load sensor, binary sensor, calendar, button, select, event, and lock."""
     smartdoor_entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -1777,6 +2368,7 @@ async def test_entry_platforms_include_sensor_for_smartdoor_only(mock_config_ent
 
     assert platforms == [
         Platform.SENSOR,
+        Platform.BINARY_SENSOR,
         Platform.CALENDAR,
         Platform.BUTTON,
         Platform.SELECT,
@@ -1801,7 +2393,7 @@ def test_entry_platforms_skip_calendar_when_schedules_disabled(mock_config_entry
 
     platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
 
-    assert platforms == [Platform.SENSOR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
+    assert platforms == [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
 
 
 def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, mock_config_entry) -> None:
@@ -1844,6 +2436,39 @@ def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, m
     assert entity_reg.async_get(schedule_sensor_entry.entity_id) is None
     assert entity_reg.async_get(refresh_button_entry.entity_id) is None
     assert entity_reg.async_get(activity_entry.entity_id) is not None
+
+
+def test_update_diagnostic_entity_categories_updates_existing_registry_entries(hass, mock_config_entry) -> None:
+    """Diagnostic SmartDoor entities should move into the diagnostic section on existing installs."""
+    mock_config_entry.add_to_hass(hass)
+    entity_reg = er.async_get(hass)
+
+    ac_power_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_ac_power",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_ac_power",
+    )
+    battery_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_battery_level",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_battery_level",
+    )
+
+    assert ac_power_entry.entity_category is None
+    assert battery_entry.entity_category is None
+
+    integration_module._async_update_diagnostic_entity_categories(hass, mock_config_entry)  # noqa: SLF001
+
+    updated_ac_power_entry = entity_reg.async_get(ac_power_entry.entity_id)
+    updated_battery_entry = entity_reg.async_get(battery_entry.entity_id)
+    assert updated_ac_power_entry is not None
+    assert updated_battery_entry is not None
+    assert updated_ac_power_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_battery_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio

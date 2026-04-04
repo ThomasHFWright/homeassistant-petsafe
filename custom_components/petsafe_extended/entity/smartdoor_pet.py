@@ -48,7 +48,11 @@ class PetSafeExtendedSmartDoorPetEntity(PetSafeExtendedEntity):
         """Return whether the linked SmartDoor and pet state are available."""
         if not super().available or self._get_door() is None:
             return False
-        return self._pet_id in self.coordinator.get_smartdoor_pet_ids(self._api_name)
+        return self._pet_id in self._pet_ids_for_availability()
+
+    def _pet_ids_for_availability(self) -> tuple[str, ...]:
+        """Return the pet identifiers that should keep this entity available."""
+        return self.coordinator.get_smartdoor_pet_ids(self._api_name)
 
     def _get_door(self) -> Any | None:
         """Return the current SmartDoor device from coordinator data."""

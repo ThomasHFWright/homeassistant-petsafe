@@ -102,6 +102,10 @@ class PetSafeExtendedSmartDoorScheduleCalendar(CalendarEntity, PetSafeExtendedSm
             return timezone
         return dt_util.DEFAULT_TIME_ZONE or UTC
 
+    def _pet_ids_for_availability(self) -> tuple[str, ...]:
+        """Return the scheduled pet identifiers that should keep this calendar available."""
+        return self.coordinator.get_smartdoor_scheduled_pet_ids(self._api_name)
+
 
 def _as_calendar_event(
     interval: PetSafeExtendedSmartDoorPetScheduleInterval,
