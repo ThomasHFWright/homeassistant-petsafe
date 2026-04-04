@@ -12,6 +12,8 @@ import httpx
 
 from custom_components.petsafe_extended.const import (
     CAT_IN_BOX,
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
     DOMAIN,
     ERROR_SENSOR_BLOCKED,
     LOGGER,
@@ -219,6 +221,15 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             return SMARTDOOR_MODE_SMART
         return SMARTDOOR_MODE_MANUAL_LOCKED
 
+    def _smartdoor_schedules_enabled(self) -> bool:
+        """Return whether SmartDoor schedule entities and polling are enabled."""
+        return bool(
+            self.config_entry.options.get(
+                CONF_ENABLE_SMARTDOOR_SCHEDULES,
+                DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+            )
+        )
+
     def _seed_smartdoor_locked_mode_preferences(self, smartdoors: list[Any]) -> None:
         """Seed SmartDoor locked-mode preferences from live device state."""
         previous_preferences = dict(self._smartdoor_locked_mode_preferences)
@@ -320,6 +331,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
     def get_smartdoor_scheduled_pet_ids(self, api_name: str) -> tuple[str, ...]:
         """Return linked pets with at least one enabled SmartDoor schedule."""
+        if not self._smartdoor_schedules_enabled():
+            return ()
+
         rules = self.get_smartdoor_schedule_rules(api_name) or ()
         scheduled_pet_ids = get_smartdoor_scheduled_pet_ids(rules)
         if not scheduled_pet_ids:
@@ -764,7 +778,11 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     smartdoor_schedule_rules,
                     smartdoor_schedule_summaries,
                     smartdoor_pet_schedule_states,
-                ) = await self._async_build_smartdoor_schedule_data(smartdoors, pet_links)
+                ) = (
+                    await self._async_build_smartdoor_schedule_data(smartdoors, pet_links)
+                    if self._smartdoor_schedules_enabled()
+                    else ({}, {}, {})
+                )
                 self._feeders = feeders
                 self._litterboxes = litterboxes
                 self._smartdoors = smartdoors
@@ -987,6 +1005,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
     def _update_live_smartdoor_schedule_state(self, door: Any) -> None:
         """Recompute per-pet schedule state after a live SmartDoor mode refresh."""
+        if not self._smartdoor_schedules_enabled():
+            return
+
         door_api_name = cast(str, door.api_name)
         rules = self._current_smartdoor_schedule_rules().get(door_api_name)
         if rules is None:

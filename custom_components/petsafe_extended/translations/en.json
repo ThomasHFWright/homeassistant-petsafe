@@ -37,6 +37,15 @@
             }
         }
     },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "enable_smartdoor_schedules": "Enable SmartDoor schedules"
+                }
+            }
+        }
+    },
     "entity": {
         "calendar": {
             "schedule": {

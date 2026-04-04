@@ -10,7 +10,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
+from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    CONF_REFRESH_TOKEN,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DOMAIN,
+)
 from custom_components.petsafe_extended.utils.auth import build_account_unique_id
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CODE, CONF_EMAIL, CONF_TOKEN
@@ -235,3 +240,33 @@ async def test_reauth_flow_updates_existing_entry_tokens(hass) -> None:
     assert updated_entry.data["feeders"] == ["feeder-1"]
     assert updated_entry.data["smartdoors"] == ["door-1"]
     mock_reload.assert_called_once_with(old_entry.entry_id)
+
+
+@pytest.mark.asyncio
+async def test_options_flow_updates_schedule_toggle(hass) -> None:
+    """The options flow should persist the SmartDoor schedule toggle."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_EMAIL: "person@example.com",
+            CONF_TOKEN: "id-token",
+            CONF_ACCESS_TOKEN: "access-token",
+            CONF_REFRESH_TOKEN: "refresh-token",
+        },
+        options={CONF_ENABLE_SMARTDOOR_SCHEDULES: DEFAULT_ENABLE_SMARTDOOR_SCHEDULES},
+        unique_id="account-person",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ENABLE_SMARTDOOR_SCHEDULES: False},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_ENABLE_SMARTDOOR_SCHEDULES: False}

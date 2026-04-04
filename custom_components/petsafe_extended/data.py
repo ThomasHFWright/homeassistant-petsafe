@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
+    from homeassistant.const import Platform
     from homeassistant.loader import Integration
 
     from .coordinator import PetSafeExtendedDataUpdateCoordinator
@@ -176,3 +177,5 @@ class PetSafeExtendedRuntimeData:
     client: Any
     coordinator: PetSafeExtendedDataUpdateCoordinator
     integration: Integration
+    loaded_platforms: tuple[Platform, ...] = ()
+    smartdoor_schedules_enabled: bool = True

@@ -16,6 +16,7 @@ from custom_components import petsafe_extended as integration_module
 from custom_components.petsafe_extended.calendar import async_setup_entry as async_setup_calendar_entry
 from custom_components.petsafe_extended.calendar.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleCalendar
 from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
     DOMAIN,
     SMARTDOOR_FINAL_ACT_LOCKED,
     SMARTDOOR_FINAL_ACT_UNLOCKED,
@@ -69,6 +70,7 @@ from custom_components.petsafe_extended.sensor.smartdoor_pet import PetSafeExten
 from custom_components.petsafe_extended.sensor.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleSensor
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 
@@ -926,12 +928,94 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
 
 
 @pytest.mark.asyncio
+async def test_sensor_platform_skips_smartdoor_schedule_entities_when_disabled(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Disabling SmartDoor schedules should leave only the always-on pet sensors."""
+    door = _create_smartdoor(api_name="door-1")
+    disabled_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**mock_config_entry.data},
+        options={CONF_ENABLE_SMARTDOOR_SCHEDULES: False},
+        unique_id=mock_config_entry.unique_id,
+    )
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), disabled_entry)
+    disabled_entry.add_to_hass(hass)
+    attach_runtime_data(disabled_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            links=(
+                PetSafeExtendedPetProductLink("pet-1", "door-1", "smartdoor"),
+                PetSafeExtendedPetProductLink("pet-2", "door-1", "smartdoor"),
+            ),
+            pets_by_id={
+                "pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo"),
+                "pet-2": PetSafeExtendedPetProfile(pet_id="pet-2", name="Ruby"),
+            },
+            product_ids_by_pet_id={"pet-1": ("door-1",), "pet-2": ("door-1",)},
+            pet_ids_by_product_id={"door-1": ("pet-1", "pet-2")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_pet_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetState(
+                    last_seen=None,
+                    last_activity=SMARTDOOR_PET_ACTIVITY_ENTERED,
+                    last_activity_at=None,
+                    last_activity_code="PET_ENTERED",
+                ),
+                "pet-2": PetSafeExtendedSmartDoorPetState(
+                    last_seen=None,
+                    last_activity=SMARTDOOR_PET_ACTIVITY_UNKNOWN,
+                    last_activity_at=None,
+                    last_activity_code=None,
+                ),
+            }
+        },
+        smartdoor_schedule_summaries={
+            "door-1": PetSafeExtendedSmartDoorScheduleSummary(
+                schedule_rule_count=2,
+                enabled_schedule_count=2,
+                disabled_schedule_count=0,
+                scheduled_pet_count=2,
+            )
+        },
+        smartdoor_pet_schedule_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetScheduleState(
+                    smart_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    effective_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                )
+            }
+        },
+    )
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_feeders", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_sensor_entry(hass, disabled_entry, async_add_entities)
+
+    async_add_entities.assert_called_once()
+    added_entities = async_add_entities.call_args[0][0]
+
+    assert len(added_entities) == 4
+    assert all(isinstance(entity, PetSafeExtendedSmartDoorPetSensor) for entity in added_entities)
+    assert {entity.entity_description.key for entity in added_entities} == {"last_seen", "last_activity"}
+
+
+@pytest.mark.asyncio
 async def test_calendar_platform_adds_smartdoor_schedule_calendar(
     hass,
     mock_config_entry,
     attach_runtime_data,
 ) -> None:
-    """The calendar platform should add one grouped schedule calendar per SmartDoor cohort."""
+    """The calendar platform should add one per-pet schedule calendar for each scheduled pet."""
     door = _create_smartdoor(api_name="door-1")
     coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
     mock_config_entry.add_to_hass(hass)
@@ -975,6 +1059,32 @@ async def test_calendar_platform_adds_smartdoor_schedule_calendar(
     assert added_entities[0].device_info is not None
     assert added_entities[0].device_info["identifiers"] == {("petsafe_extended", "door-1")}
     assert added_entities[0].name == "Milo Schedule"
+
+
+@pytest.mark.asyncio
+async def test_calendar_platform_skips_smartdoor_schedule_calendar_when_disabled(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Disabling SmartDoor schedules should suppress the calendar platform entirely."""
+    door = _create_smartdoor(api_name="door-1")
+    disabled_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**mock_config_entry.data},
+        options={CONF_ENABLE_SMARTDOOR_SCHEDULES: False},
+        unique_id=mock_config_entry.unique_id,
+    )
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), disabled_entry)
+    disabled_entry.add_to_hass(hass)
+    attach_runtime_data(disabled_entry, coordinator)
+    coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
+
+    async_add_entities = MagicMock()
+    with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
+        await async_setup_calendar_entry(hass, disabled_entry, async_add_entities)
+
+    async_add_entities.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1515,6 +1625,85 @@ async def test_entry_platforms_include_sensor_for_smartdoor_only(mock_config_ent
     platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
 
     assert platforms == [Platform.SENSOR, Platform.CALENDAR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
+
+
+def test_entry_platforms_skip_calendar_when_schedules_disabled(mock_config_entry) -> None:
+    """Disabling SmartDoor schedules should remove the calendar platform only."""
+    smartdoor_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **mock_config_entry.data,
+            "feeders": [],
+            "litterboxes": [],
+            "smartdoors": ["door-1"],
+        },
+        options={CONF_ENABLE_SMARTDOOR_SCHEDULES: False},
+        unique_id=mock_config_entry.unique_id,
+    )
+
+    platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
+
+    assert platforms == [Platform.SENSOR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
+
+
+def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, mock_config_entry) -> None:
+    """Turning schedules off should remove only the schedule-derived entities from the registry."""
+    mock_config_entry.add_to_hass(hass)
+    entity_reg = er.async_get(hass)
+
+    schedule_entry = entity_reg.async_get_or_create(
+        "calendar",
+        DOMAIN,
+        "door-1_pet-1_schedule",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_schedule",
+    )
+    schedule_sensor_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_schedule_rule_count",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_schedule_rule_count",
+    )
+    activity_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_pet-1_last_activity",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_last_activity",
+    )
+
+    integration_module._async_remove_schedule_entities(hass, mock_config_entry)  # noqa: SLF001
+
+    assert entity_reg.async_get(schedule_entry.entity_id) is None
+    assert entity_reg.async_get(schedule_sensor_entry.entity_id) is None
+    assert entity_reg.async_get(activity_entry.entity_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_coordinator_refresh_skips_schedule_polling_when_schedules_disabled(hass, mock_config_entry) -> None:
+    """Disabling SmartDoor schedules should skip schedule refresh work entirely."""
+    disabled_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**mock_config_entry.data},
+        options={CONF_ENABLE_SMARTDOOR_SCHEDULES: False},
+        unique_id=mock_config_entry.unique_id,
+    )
+    door = _create_smartdoor(api_name="door-1")
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, disabled_entry)
+    coordinator._async_build_pet_links = AsyncMock(return_value=PetSafeExtendedPetLinkData())  # noqa: SLF001
+    coordinator._async_build_smartdoor_pet_states = AsyncMock(return_value=({}, {}, {}))  # noqa: SLF001
+    coordinator._async_build_smartdoor_schedule_data = AsyncMock(return_value=({}, {}, {}))  # noqa: SLF001
+
+    await coordinator.async_refresh()
+
+    coordinator._async_build_smartdoor_schedule_data.assert_not_awaited()  # noqa: SLF001
+    door.get_schedules.assert_not_awaited()
+    door.get_preferences.assert_not_awaited()
 
 
 @pytest.mark.asyncio

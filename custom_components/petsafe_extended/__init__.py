@@ -8,12 +8,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
 from homeassistant.loader import async_get_integration
 from homeassistant.requirements import RequirementsNotFound
 
 from .api import async_import_petsafe, create_petsafe_client
-from .const import DOMAIN, LOGGER
+from .const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES, DOMAIN, LOGGER
 from .coordinator import PetSafeExtendedDataUpdateCoordinator
 from .data import PetSafeExtendedConfigEntry, PetSafeExtendedRuntimeData
 from .service_actions import async_setup_services
@@ -29,6 +30,14 @@ PLATFORMS: list[Platform] = [
     Platform.LOCK,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+_SCHEDULE_ENTITY_UNIQUE_ID_SUFFIXES = {
+    "_schedule",
+    "_schedule_rule_count",
+    "_scheduled_pet_count",
+    "_smart_access",
+    "_next_smart_access",
+    "_next_smart_access_change",
+}
 
 
 def _entry_has_selected_devices(entry: ConfigEntry, key: str) -> bool:
@@ -40,6 +49,7 @@ def _entry_has_selected_devices(entry: ConfigEntry, key: str) -> bool:
 def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
     """Return only the platforms needed for the selected devices."""
     platforms: list[Platform] = []
+    schedules_enabled = _entry_smartdoor_schedules_enabled(entry)
 
     if (
         _entry_has_selected_devices(entry, "feeders")
@@ -47,7 +57,7 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         or _entry_has_selected_devices(entry, "smartdoors")
     ):
         platforms.append(Platform.SENSOR)
-    if _entry_has_selected_devices(entry, "smartdoors"):
+    if _entry_has_selected_devices(entry, "smartdoors") and schedules_enabled:
         platforms.append(Platform.CALENDAR)
     if _entry_has_selected_devices(entry, "feeders"):
         platforms.append(Platform.SWITCH)
@@ -61,6 +71,34 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         platforms.append(Platform.LOCK)
 
     return platforms
+
+
+def _entry_smartdoor_schedules_enabled(entry: ConfigEntry) -> bool:
+    """Return whether SmartDoor schedule entities should be created for an entry."""
+    return bool(entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES))
+
+
+def _is_schedule_entity_unique_id(unique_id: str | None) -> bool:
+    """Return whether a unique ID belongs to a SmartDoor schedule entity."""
+    return unique_id is not None and any(unique_id.endswith(suffix) for suffix in _SCHEDULE_ENTITY_UNIQUE_ID_SUFFIXES)
+
+
+def _async_remove_schedule_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove SmartDoor schedule entities from the entity registry for a config entry."""
+    entity_reg = er.async_get(hass)
+    for entity_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
+        if _is_schedule_entity_unique_id(entity_entry.unique_id):
+            entity_reg.async_remove(entity_entry.entity_id)
+
+
+async def _async_handle_entry_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload an entry after options change and purge removed schedule entities when needed."""
+    typed_entry = cast(PetSafeExtendedConfigEntry, entry)
+    runtime_data = typed_entry.runtime_data
+    schedules_enabled = _entry_smartdoor_schedules_enabled(typed_entry)
+    if runtime_data.smartdoor_schedules_enabled and not schedules_enabled:
+        _async_remove_schedule_entities(hass, typed_entry)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _ensure_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -97,6 +135,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up PetSafe Extended from a config entry."""
     typed_entry = cast(PetSafeExtendedConfigEntry, entry)
     _ensure_entry_unique_id(hass, typed_entry)
+    schedules_enabled = _entry_smartdoor_schedules_enabled(typed_entry)
 
     try:
         petsafe = await async_import_petsafe(hass)
@@ -110,11 +149,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client=client,
         coordinator=coordinator,
         integration=integration,
+        smartdoor_schedules_enabled=schedules_enabled,
     )
+    typed_entry.async_on_unload(typed_entry.add_update_listener(_async_handle_entry_update))
 
     await coordinator.async_config_entry_first_refresh()
+    if not schedules_enabled:
+        _async_remove_schedule_entities(hass, typed_entry)
 
     platforms = _get_entry_platforms(typed_entry)
+    typed_entry.runtime_data.loaded_platforms = tuple(platforms)
     if platforms:
         await hass.config_entries.async_forward_entry_setups(typed_entry, platforms)
 
@@ -123,8 +167,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    platforms = _get_entry_platforms(entry)
+    typed_entry = cast(PetSafeExtendedConfigEntry, entry)
+    platforms = list(typed_entry.runtime_data.loaded_platforms) if typed_entry.runtime_data.loaded_platforms else []
+    if not platforms:
+        platforms = _get_entry_platforms(entry)
     if not platforms:
         return True
 
-    return await hass.config_entries.async_unload_platforms(entry, platforms)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if unload_ok:
+        typed_entry.runtime_data.loaded_platforms = ()
+    return unload_ok

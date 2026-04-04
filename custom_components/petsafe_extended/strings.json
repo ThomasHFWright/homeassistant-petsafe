@@ -37,6 +37,15 @@
       "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "enable_smartdoor_schedules": "Enable SmartDoor schedules"
+        }
+      }
+    }
+  },
   "entity": {
     "calendar": {
       "schedule": {
