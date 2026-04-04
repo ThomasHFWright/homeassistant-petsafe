@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .feeder import FEEDER_SENSOR_DESCRIPTIONS, PetSafeExtendedFeederSensor
 from .litterbox import LITTERBOX_SENSOR_DESCRIPTIONS, PetSafeExtendedLitterboxSensor
+from .smartdoor_diagnostic import SMARTDOOR_DIAGNOSTIC_SENSOR_DESCRIPTIONS, PetSafeExtendedSmartDoorDiagnosticSensor
 from .smartdoor_pet import (
     SMARTDOOR_PET_LAST_ACTIVITY_DESCRIPTION,
     SMARTDOOR_PET_LAST_SEEN_DESCRIPTION,
@@ -55,6 +56,11 @@ async def async_setup_entry(
         PetSafeExtendedLitterboxSensor(coordinator, litterbox, description)
         for litterbox in litterboxes
         for description in LITTERBOX_SENSOR_DESCRIPTIONS
+    )
+    entities.extend(
+        PetSafeExtendedSmartDoorDiagnosticSensor(coordinator, smartdoor, description)
+        for smartdoor in smartdoors
+        for description in SMARTDOOR_DIAGNOSTIC_SENSOR_DESCRIPTIONS
     )
     entities.extend(
         PetSafeExtendedSmartDoorPetSensor(coordinator, smartdoor, pet_id, description)

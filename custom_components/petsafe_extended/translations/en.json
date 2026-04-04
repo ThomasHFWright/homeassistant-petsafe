@@ -44,12 +44,20 @@
                     "enable_smartdoor_schedules": "Enable SmartDoor schedules"
                 }
             }
-        }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ac_power": {
+        "name": "AC Power"
+      },
+      "problem": {
+        "name": "Problem"
+      }
     },
-    "entity": {
-        "button": {
-            "refresh_feeding_schedule_data": {
-                "name": "Refresh Schedule Data"
+    "button": {
+      "refresh_feeding_schedule_data": {
+        "name": "Refresh Schedule Data"
             },
             "refresh_schedule_data": {
                 "name": "Refresh Schedule Data"
@@ -89,11 +97,20 @@
                     }
                 }
             }
-        },
-        "sensor": {
-            "schedule_rule_count": {
-                "name": "Schedule Rule Count"
-            },
+    },
+    "sensor": {
+      "battery_level": {
+        "name": "Battery Level"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "signal_strength": {
+        "name": "Signal Strength"
+      },
+      "schedule_rule_count": {
+        "name": "Schedule Rule Count"
+      },
             "scheduled_pet_count": {
                 "name": "Scheduled Pet Count"
             },

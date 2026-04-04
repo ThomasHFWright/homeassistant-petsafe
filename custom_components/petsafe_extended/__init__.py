@@ -22,6 +22,7 @@ from .utils.auth import get_entry_unique_id
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
     Platform.CALENDAR,
     Platform.SWITCH,
     Platform.BUTTON,
@@ -58,6 +59,8 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
         or _entry_has_selected_devices(entry, "smartdoors")
     ):
         platforms.append(Platform.SENSOR)
+    if _entry_has_selected_devices(entry, "smartdoors"):
+        platforms.append(Platform.BINARY_SENSOR)
     if _entry_has_selected_devices(entry, "smartdoors") and schedules_enabled:
         platforms.append(Platform.CALENDAR)
     if _entry_has_selected_devices(entry, "feeders"):
