@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 SMARTDOOR_ACTIVITY_INITIAL_LIMIT = 200
 SMARTDOOR_ACTIVITY_HISTORY_LIMIT = 100
+SMARTDOOR_ACTIVITY_EMITTED_KEY_LIMIT = SMARTDOOR_ACTIVITY_INITIAL_LIMIT * 4
 
 SMARTDOOR_PET_ACTIVITY_UNKNOWN = "unknown"
 SMARTDOOR_PET_ACTIVITY_ENTERED = "entered"
@@ -46,6 +47,8 @@ SMARTDOOR_ACTIVITY_EVENT_TYPES = [
 ]
 
 _PET_ID_KEYS = ("petId", "petID", "pet_id")
+
+type SmartDoorActivityRecordKey = tuple[str, str, str | None]
 
 
 def copy_smartdoor_activity_records(
@@ -90,9 +93,9 @@ def merge_activity_records(
     new: list[PetSafeExtendedSmartDoorActivityRecord],
 ) -> tuple[PetSafeExtendedSmartDoorActivityRecord, ...]:
     """Merge recent activity records while keeping order and removing duplicates."""
-    record_map: dict[tuple[str, str, str | None], PetSafeExtendedSmartDoorActivityRecord] = {}
+    record_map: dict[SmartDoorActivityRecordKey, PetSafeExtendedSmartDoorActivityRecord] = {}
     for record in (*previous, *new):
-        record_map[(record.timestamp.isoformat(), record.code, record.pet_id)] = record
+        record_map[get_smartdoor_activity_record_key(record)] = record
 
     return tuple(
         sorted(
@@ -107,12 +110,12 @@ def get_new_activity_records(
     new: Sequence[PetSafeExtendedSmartDoorActivityRecord],
 ) -> list[PetSafeExtendedSmartDoorActivityRecord]:
     """Return only activity records that have not already been observed."""
-    previous_keys = {_record_key(record) for record in previous}
-    emitted_keys: set[tuple[str, str, str | None]] = set()
+    previous_keys = {get_smartdoor_activity_record_key(record) for record in previous}
+    emitted_keys: set[SmartDoorActivityRecordKey] = set()
     fresh_records: list[PetSafeExtendedSmartDoorActivityRecord] = []
 
     for record in sorted(new, key=lambda item: item.timestamp):
-        record_key = _record_key(record)
+        record_key = get_smartdoor_activity_record_key(record)
         if record_key in previous_keys or record_key in emitted_keys:
             continue
         emitted_keys.add(record_key)
@@ -277,6 +280,6 @@ def _get_nested_mapping(value: Mapping[str, Any] | None, key: str) -> Mapping[st
     return nested if isinstance(nested, Mapping) else None
 
 
-def _record_key(record: PetSafeExtendedSmartDoorActivityRecord) -> tuple[str, str, str | None]:
+def get_smartdoor_activity_record_key(record: PetSafeExtendedSmartDoorActivityRecord) -> SmartDoorActivityRecordKey:
     """Return the dedupe key for a normalized SmartDoor activity record."""
     return record.timestamp.isoformat(), record.code, record.pet_id
