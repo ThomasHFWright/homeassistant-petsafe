@@ -115,6 +115,7 @@ class PetSafeExtendedSmartDoorPetScheduleState:
 
     smart_access: str = "unknown"
     effective_access: str = "unknown"
+    override_access: str | None = None
     control_source: str = "smart"
     active_schedule_title: str | None = None
     next_change_at: datetime | None = None
@@ -165,6 +166,7 @@ class PetSafeExtendedCoordinatorData:
     smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = field(default_factory=dict)
     smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = field(default_factory=dict)
     smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = field(default_factory=dict)
+    smartdoor_override_options: dict[str, str] = field(default_factory=dict)
     smartdoor_pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = field(
         default_factory=dict
     )

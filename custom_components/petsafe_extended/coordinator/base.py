@@ -29,6 +29,7 @@ from custom_components.petsafe_extended.const import (
     SMARTDOOR_MODE_MANUAL_LOCKED,
     SMARTDOOR_MODE_MANUAL_UNLOCKED,
     SMARTDOOR_MODE_SMART,
+    SMARTDOOR_OVERRIDE_REFRESH_INTERVAL,
     SMARTDOOR_SCHEDULE_REFRESH_INTERVAL,
 )
 from custom_components.petsafe_extended.coordinator.pet_links import (
@@ -68,6 +69,11 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorPetState,
     PetSafeExtendedSmartDoorScheduleRule,
     PetSafeExtendedSmartDoorScheduleSummary,
+)
+from custom_components.petsafe_extended.entity_utils.smartdoor_access import (
+    SMARTDOOR_ACCESS_SMART_SCHEDULE,
+    normalize_smartdoor_override_option,
+    smartdoor_override_option_to_access_value,
 )
 from custom_components.petsafe_extended.utils.smartdoor import (
     get_smartdoor_final_act_value,
@@ -121,7 +127,9 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
         self._smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
         self._smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
+        self._smartdoor_override_options: dict[str, str] = {}
         self._smartdoor_pet_schedule_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]] = {}
+        self._smartdoor_override_last_refresh_by_door: dict[str, float] = {}
         self._smartdoor_schedule_last_refresh_by_door: dict[str, float] = {}
         self._smartdoor_locked_mode_preferences: dict[str, str] = {}
         self._smartdoor_activity_listeners: dict[
@@ -168,6 +176,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             smartdoor_schedule_summaries=copy_smartdoor_schedule_summaries(
                 self._smartdoor_schedule_summaries or current.smartdoor_schedule_summaries
             ),
+            smartdoor_override_options=dict(self._smartdoor_override_options or current.smartdoor_override_options),
             smartdoor_pet_schedule_states=copy_smartdoor_pet_schedule_states(
                 self._smartdoor_pet_schedule_states or current.smartdoor_pet_schedule_states
             ),
@@ -229,6 +238,14 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             return self._smartdoor_schedule_summaries
         if self.data is not None:
             return self.data.smartdoor_schedule_summaries
+        return {}
+
+    def _current_smartdoor_override_options(self) -> dict[str, str]:
+        """Return cached SmartDoor override options."""
+        if self._smartdoor_override_options:
+            return self._smartdoor_override_options
+        if self.data is not None:
+            return self.data.smartdoor_override_options
         return {}
 
     def _current_smartdoor_pet_schedule_states(self) -> dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]]:
@@ -436,6 +453,10 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         """Return the Home Assistant option for the preferred locked mode."""
         option = get_smartdoor_locked_mode_option(self.get_smartdoor_locked_mode_preference(api_name))
         return option or "locked"
+
+    def get_smartdoor_override_option(self, api_name: str) -> str:
+        """Return the current Home Assistant option for the SmartDoor override state."""
+        return self._current_smartdoor_override_options().get(api_name, SMARTDOOR_ACCESS_SMART_SCHEDULE)
 
     async def async_refresh_feeder_schedule_data(self, api_name: str) -> None:
         """Force a feeder schedule refresh on the next coordinator cycle."""
@@ -795,6 +816,25 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
 
         return await self.async_set_smartdoor_operating_mode(api_name, normalized_mode)
 
+    async def async_set_smartdoor_override(self, api_name: str, option: str) -> Any:
+        """Set a SmartDoor schedule override and return the refreshed device."""
+        access_value = smartdoor_override_option_to_access_value(option)
+        if access_value is None:
+            raise ValueError(f"Unsupported SmartDoor override option: {option}")
+
+        await self.get_smartdoors()
+        async with self._device_lock:
+            door = self._find_cached_smartdoor(api_name)
+            if door is None:
+                raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+            try:
+                await door.override_schedule(access_value, update_data=False)
+            except httpx.HTTPStatusError as err:
+                if self._is_auth_error(err):
+                    self._raise_auth_failed(err)
+                raise
+        return await self.async_refresh_smartdoor_override(api_name, expected_option=option)
+
     async def async_set_smartdoor_final_act(self, api_name: str, final_act: str) -> Any:
         """Set a SmartDoor final-act state and return the refreshed device."""
         await self.get_smartdoors()
@@ -870,6 +910,54 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         )
         return refreshed_door
 
+    async def async_refresh_smartdoor_override(
+        self,
+        api_name: str,
+        *,
+        expected_option: str | None = None,
+        refresh_attempts: int = 4,
+        refresh_interval: float = 1.0,
+    ) -> Any:
+        """Refresh SmartDoor override state after sending an override command."""
+        await self.get_smartdoors()
+        attempts = max(refresh_attempts, 1)
+        refreshed_door: Any | None = None
+
+        for attempt in range(attempts):
+            async with self._device_lock:
+                door = self._find_cached_smartdoor(api_name)
+                if door is None:
+                    raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+
+                try:
+                    override_payload = await door.get_override_schedules()
+                except httpx.HTTPStatusError as err:
+                    if self._is_auth_error(err):
+                        self._raise_auth_failed(err)
+                    raise
+
+                self._smartdoor_override_options[api_name] = normalize_smartdoor_override_option(override_payload)
+                self._smartdoor_override_last_refresh_by_door[api_name] = time.monotonic()
+                refreshed_door = door
+                self._update_live_smartdoor_schedule_state(door)
+                self.async_set_updated_data(self._cached_snapshot())
+
+                if expected_option is None or self._smartdoor_override_options[api_name] == expected_option:
+                    return door
+
+            if attempt < attempts - 1:
+                await asyncio.sleep(refresh_interval)
+
+        if refreshed_door is None:
+            raise ValueError(f"Unknown SmartDoor API name: {api_name}")
+        LOGGER.debug(
+            "SmartDoor %s did not report expected override %s after %s refresh attempts",
+            api_name,
+            expected_option,
+            attempts,
+        )
+        return refreshed_door
+
     async def _async_get_feeders_for_update(self, now_monotonic: float) -> list[Any]:
         """Return the current feeder list, refreshing it when due."""
         refresh_due = self._refresh_due(
@@ -923,6 +1011,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         smartdoors: list[Any],
         pet_links: PetSafeExtendedPetLinkData,
         rules_by_door: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]],
+        override_options_by_door: dict[str, str] | None = None,
     ) -> tuple[
         dict[str, PetSafeExtendedSmartDoorScheduleSummary],
         dict[str, dict[str, PetSafeExtendedSmartDoorPetScheduleState]],
@@ -935,6 +1024,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
         now = dt_util.now().astimezone(default_timezone)
         current_data = self.data or PetSafeExtendedCoordinatorData()
+        override_options = override_options_by_door or self._current_smartdoor_override_options()
 
         for door in smartdoors:
             door_api_name = cast(str, door.api_name)
@@ -953,10 +1043,12 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 now=now,
                 default_timezone=default_timezone,
             )
+            override_option = override_options.get(door_api_name, SMARTDOOR_ACCESS_SMART_SCHEDULE)
             pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
                 rules,
                 linked_pet_ids,
                 door_mode=getattr(door, "mode", None),
+                override_access=override_option,
                 now=now,
                 default_timezone=default_timezone,
             )
@@ -979,6 +1071,10 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     smartdoor_pet_states,
                     dispatch_records_by_door,
                 ) = await self._async_build_smartdoor_pet_states(smartdoors, pet_links, now_monotonic)
+                smartdoor_override_options = await self._async_build_smartdoor_override_options(
+                    smartdoors,
+                    now_monotonic,
+                )
                 smartdoor_schedule_rules = copy_smartdoor_schedule_rules(self._current_smartdoor_schedule_rules())
                 if self._smartdoor_schedules_enabled():
                     smartdoor_schedule_rules = await self._async_build_smartdoor_schedule_data(
@@ -991,6 +1087,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                             smartdoors,
                             pet_links,
                             smartdoor_schedule_rules,
+                            smartdoor_override_options,
                         )
                     )
                 else:
@@ -1007,6 +1104,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                 self._smartdoor_pet_states = smartdoor_pet_states
                 self._smartdoor_schedule_rules = smartdoor_schedule_rules
                 self._smartdoor_schedule_summaries = smartdoor_schedule_summaries
+                self._smartdoor_override_options = smartdoor_override_options
                 self._smartdoor_pet_schedule_states = smartdoor_pet_schedule_states
                 data = PetSafeExtendedCoordinatorData(
                     feeders=list(feeders),
@@ -1019,6 +1117,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
                     smartdoor_pet_states=copy_smartdoor_pet_states(smartdoor_pet_states),
                     smartdoor_schedule_rules=copy_smartdoor_schedule_rules(smartdoor_schedule_rules),
                     smartdoor_schedule_summaries=copy_smartdoor_schedule_summaries(smartdoor_schedule_summaries),
+                    smartdoor_override_options=dict(smartdoor_override_options),
                     smartdoor_pet_schedule_states=copy_smartdoor_pet_schedule_states(smartdoor_pet_schedule_states),
                 )
         except httpx.HTTPStatusError as err:
@@ -1213,6 +1312,52 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._cleanup_force_refresh_keys(self._force_refresh_smartdoor_schedule_api_names, current_door_ids)
         return schedule_rules
 
+    async def _async_build_smartdoor_override_options(
+        self,
+        smartdoors: list[Any],
+        now_monotonic: float,
+    ) -> dict[str, str]:
+        """Refresh SmartDoor override state on its own fast polling cadence."""
+        previous_options = dict(self._current_smartdoor_override_options())
+        override_options: dict[str, str] = {}
+
+        for door in smartdoors:
+            door_api_name = cast(str, door.api_name)
+            try:
+                refresh_due = self._refresh_due(
+                    self._smartdoor_override_last_refresh_by_door.get(door_api_name),
+                    SMARTDOOR_OVERRIDE_REFRESH_INTERVAL,
+                    now_monotonic,
+                )
+                if not refresh_due:
+                    override_options[door_api_name] = previous_options.get(
+                        door_api_name,
+                        SMARTDOOR_ACCESS_SMART_SCHEDULE,
+                    )
+                    continue
+
+                override_payload = await door.get_override_schedules()
+                override_options[door_api_name] = normalize_smartdoor_override_option(override_payload)
+                self._smartdoor_override_last_refresh_by_door[door_api_name] = now_monotonic
+            except httpx.HTTPStatusError as err:
+                if self._is_auth_error(err):
+                    self._raise_auth_failed(err)
+                LOGGER.debug("Failed to refresh SmartDoor override for %s: %s", door_api_name, err)
+                override_options[door_api_name] = previous_options.get(
+                    door_api_name,
+                    SMARTDOOR_ACCESS_SMART_SCHEDULE,
+                )
+            except Exception as err:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+                LOGGER.debug("Failed to refresh SmartDoor override for %s: %s", door_api_name, err)
+                override_options[door_api_name] = previous_options.get(
+                    door_api_name,
+                    SMARTDOOR_ACCESS_SMART_SCHEDULE,
+                )
+
+        current_door_ids = {cast(str, door.api_name) for door in smartdoors}
+        self._cleanup_timestamp_map(self._smartdoor_override_last_refresh_by_door, current_door_ids)
+        return override_options
+
     def _update_live_smartdoor_schedule_state(self, door: Any) -> None:
         """Recompute per-pet schedule state after a live SmartDoor mode refresh."""
         if not self._smartdoor_schedules_enabled():
@@ -1227,10 +1372,12 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         linked_pet_ids = tuple(sorted(pet_links.pet_ids_by_product_id.get(door_api_name, ()))) if pet_links else ()
         default_timezone = dt_util.DEFAULT_TIME_ZONE or UTC
         now = dt_util.now().astimezone(default_timezone)
+        override_option = self.get_smartdoor_override_option(door_api_name)
         self._smartdoor_pet_schedule_states[door_api_name] = build_smartdoor_pet_schedule_states(
             rules,
             linked_pet_ids,
             door_mode=getattr(door, "mode", None),
+            override_access=override_option,
             now=now,
             default_timezone=default_timezone,
         )

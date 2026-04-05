@@ -30,6 +30,12 @@ class PetSafeExtendedEntity(CoordinatorEntity[PetSafeExtendedDataUpdateCoordinat
         super().__init__(coordinator)
         self._api_name = api_name
         self.entity_description = entity_description
+        self._attr_entity_category = entity_description.entity_category
+        self._attr_entity_registry_enabled_default = getattr(
+            entity_description,
+            "entity_registry_enabled_default",
+            True,
+        )
         self._attr_unique_id = f"{api_name}_{entity_description.key}"
         self._attr_device_info = create_device_info_from_device(
             device,

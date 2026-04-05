@@ -7,12 +7,22 @@ from typing import Any
 
 from custom_components.petsafe_extended.entity.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleEntity
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.const import EntityCategory
 
 SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION = SensorEntityDescription(
     key="schedule_rule_count",
     name="Schedule Rule Count",
     translation_key="schedule_rule_count",
     icon="mdi:calendar-text",
+    entity_category=EntityCategory.DIAGNOSTIC,
+)
+
+SMARTDOOR_ACTIVE_SCHEDULE_RULE_COUNT_DESCRIPTION = SensorEntityDescription(
+    key="active_schedule_rule_count",
+    name="Active Schedule Rule Count",
+    translation_key="active_schedule_rule_count",
+    icon="mdi:calendar-check",
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION = SensorEntityDescription(
@@ -20,6 +30,7 @@ SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION = SensorEntityDescription(
     name="Scheduled Pet Count",
     translation_key="scheduled_pet_count",
     icon="mdi:paw",
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 
@@ -42,6 +53,8 @@ class PetSafeExtendedSmartDoorScheduleSensor(SensorEntity, PetSafeExtendedSmartD
         if summary is None:
             return None
 
+        if self.entity_description.key == SMARTDOOR_ACTIVE_SCHEDULE_RULE_COUNT_DESCRIPTION.key:
+            return summary.enabled_schedule_count
         if self.entity_description.key == SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION.key:
             return summary.scheduled_pet_count
         return summary.schedule_rule_count

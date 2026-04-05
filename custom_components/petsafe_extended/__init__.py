@@ -34,6 +34,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _SCHEDULE_ENTITY_UNIQUE_ID_SUFFIXES = {
     "_schedule",
     "_schedule_rule_count",
+    "_active_schedule_rule_count",
     "_scheduled_pet_count",
     "_smart_access",
     "_next_smart_access",
@@ -45,7 +46,12 @@ _DIAGNOSTIC_ENTITY_CATEGORY_BY_UNIQUE_ID_SUFFIX = {
     "_battery_voltage": EntityCategory.DIAGNOSTIC,
     "_signal_strength": EntityCategory.DIAGNOSTIC,
     "_ac_power": EntityCategory.DIAGNOSTIC,
+    "_connectivity": EntityCategory.DIAGNOSTIC,
     "_problem": EntityCategory.DIAGNOSTIC,
+    "_schedule": EntityCategory.DIAGNOSTIC,
+    "_schedule_rule_count": EntityCategory.DIAGNOSTIC,
+    "_active_schedule_rule_count": EntityCategory.DIAGNOSTIC,
+    "_scheduled_pet_count": EntityCategory.DIAGNOSTIC,
 }
 _SMARTDOOR_PET_ENTITY_UNIQUE_ID_SUFFIX_TO_DOMAIN = {
     "_last_seen": "sensor",

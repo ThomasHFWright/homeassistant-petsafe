@@ -13,43 +13,40 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorScheduleRule,
     PetSafeExtendedSmartDoorScheduleSummary,
 )
+from custom_components.petsafe_extended.entity_utils.smartdoor_access import (
+    SMARTDOOR_ACCESS_FULL_ACCESS,
+    SMARTDOOR_ACCESS_IN_ONLY,
+    SMARTDOOR_ACCESS_NO_ACCESS,
+    SMARTDOOR_ACCESS_OUT_ONLY,
+    SMARTDOOR_ACCESS_UNKNOWN,
+    SMARTDOOR_CONTROL_SOURCE_MANUAL_LOCKED,
+    SMARTDOOR_CONTROL_SOURCE_MANUAL_UNLOCKED,
+    SMARTDOOR_CONTROL_SOURCE_SMART,
+    SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE,
+    SMARTDOOR_SCHEDULE_ACCESS_OPTIONS as SHARED_SMARTDOOR_SCHEDULE_ACCESS_OPTIONS,
+    get_smartdoor_access_label,
+    normalize_smartdoor_access_option,
+    smartdoor_override_is_active,
+)
 from custom_components.petsafe_extended.utils.smartdoor import smartdoor_modes_match
 from homeassistant.util import dt as dt_util
 
-SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN = "unknown"
-SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS = "no_access"
-SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY = "out_only"
-SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY = "in_only"
-SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS = "full_access"
-SMARTDOOR_SCHEDULE_ACCESS_OPTIONS = [
-    SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN,
-    SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS,
-    SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
-    SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY,
-    SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
-]
+SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN = SMARTDOOR_ACCESS_UNKNOWN
+SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS = SMARTDOOR_ACCESS_NO_ACCESS
+SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY = SMARTDOOR_ACCESS_OUT_ONLY
+SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY = SMARTDOOR_ACCESS_IN_ONLY
+SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS = SMARTDOOR_ACCESS_FULL_ACCESS
+SMARTDOOR_SCHEDULE_ACCESS_OPTIONS = SHARED_SMARTDOOR_SCHEDULE_ACCESS_OPTIONS
 
-SMARTDOOR_SCHEDULE_CONTROL_SOURCE_SMART = "smart"
-SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_LOCKED = "manual_locked"
-SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_UNLOCKED = "manual_unlocked"
+SMARTDOOR_SCHEDULE_CONTROL_SOURCE_SMART = SMARTDOOR_CONTROL_SOURCE_SMART
+SMARTDOOR_SCHEDULE_CONTROL_SOURCE_SMART_OVERRIDE = SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE
+SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_LOCKED = SMARTDOOR_CONTROL_SOURCE_MANUAL_LOCKED
+SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_UNLOCKED = SMARTDOOR_CONTROL_SOURCE_MANUAL_UNLOCKED
 
 _DAY_MASK_LENGTH = 7
 _LOOKBACK_DAYS = 8
 _LOOKAHEAD_DAYS = 8
 _PETSAFE_DAY_INDEX_TO_WEEKDAY = (6, 0, 1, 2, 3, 4, 5)
-_ACCESS_VALUE_TO_OPTION = {
-    0: SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS,
-    1: SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
-    2: SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY,
-    3: SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
-}
-_ACCESS_LABELS = {
-    SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN: "Unknown",
-    SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS: "No access",
-    SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY: "Out only",
-    SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY: "In only",
-    SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS: "Full access",
-}
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,6 +73,16 @@ class PetSafeExtendedSmartDoorPetScheduleInterval:
     schedule_id: str
     pet_id: str
     pet_name: str
+
+
+@dataclass(slots=True, frozen=True)
+class PetSafeExtendedSmartDoorScheduleTrigger:
+    """A concrete upcoming SmartDoor schedule trigger."""
+
+    start: datetime
+    access: str
+    title: str
+    pet_name: str | None = None
 
 
 def copy_smartdoor_schedule_rules(
@@ -119,6 +126,7 @@ def copy_smartdoor_pet_schedule_states(
             pet_id: PetSafeExtendedSmartDoorPetScheduleState(
                 smart_access=state.smart_access,
                 effective_access=state.effective_access,
+                override_access=state.override_access,
                 control_source=state.control_source,
                 active_schedule_title=state.active_schedule_title,
                 next_change_at=state.next_change_at,
@@ -225,27 +233,18 @@ def build_smartdoor_schedule_summary(
     if not scheduled_pet_ids:
         return summary
 
-    next_interval: PetSafeExtendedSmartDoorPetScheduleInterval | None = None
-    for pet_id in scheduled_pet_ids:
-        candidate = get_next_smartdoor_pet_schedule_interval(
-            rules,
-            now=now,
-            default_timezone=default_timezone,
-            pet_id=pet_id,
-            include_current=False,
-        )
-        if candidate is None:
-            continue
-        if next_interval is None or candidate.start < next_interval.start:
-            next_interval = candidate
-
-    if next_interval is None:
+    next_trigger = get_next_smartdoor_schedule_trigger(
+        rules,
+        now=now,
+        default_timezone=default_timezone,
+    )
+    if next_trigger is None:
         return summary
 
-    summary.next_schedule_change_at = next_interval.start
-    summary.next_schedule_title = next_interval.title
-    summary.next_schedule_access = next_interval.access
-    summary.next_schedule_pet_name = next_interval.pet_name
+    summary.next_schedule_change_at = next_trigger.start
+    summary.next_schedule_title = next_trigger.title
+    summary.next_schedule_access = next_trigger.access
+    summary.next_schedule_pet_name = next_trigger.pet_name
     return summary
 
 
@@ -254,36 +253,67 @@ def build_smartdoor_pet_schedule_states(
     linked_pet_ids: tuple[str, ...],
     *,
     door_mode: str | None,
+    override_access: str | None,
     now: datetime,
     default_timezone: tzinfo,
 ) -> dict[str, PetSafeExtendedSmartDoorPetScheduleState]:
     """Build the current schedule-derived access state for each linked pet."""
     states: dict[str, PetSafeExtendedSmartDoorPetScheduleState] = {}
-
-    for pet_id in linked_pet_ids:
-        current_interval = get_current_smartdoor_pet_schedule_interval(
+    next_override_trigger = (
+        get_next_smartdoor_schedule_trigger(
             rules,
             now=now,
+            default_timezone=default_timezone,
+        )
+        if smartdoor_override_is_active(override_access)
+        else None
+    )
+    override_clears_at = next_override_trigger.start if next_override_trigger is not None else None
+
+    for pet_id in linked_pet_ids:
+        current_interval = get_smartdoor_pet_schedule_interval_at(
+            rules,
+            when=now,
             default_timezone=default_timezone,
             pet_id=pet_id,
         )
         smart_access = current_interval.access if current_interval is not None else SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN
-        effective_access, control_source = _resolve_effective_pet_access(door_mode, smart_access)
-        next_interval = get_next_smartdoor_pet_schedule_interval(
-            rules,
-            now=now,
-            default_timezone=default_timezone,
-            pet_id=pet_id,
-            include_current=False,
-        )
+        effective_access, control_source = _resolve_effective_pet_access(door_mode, smart_access, override_access)
+        next_change_at: datetime | None = None
+        next_smart_access: str | None = None
+        next_schedule_title: str | None = None
+
+        if override_clears_at is not None:
+            next_interval = get_smartdoor_pet_schedule_interval_at(
+                rules,
+                when=override_clears_at,
+                default_timezone=default_timezone,
+                pet_id=pet_id,
+            )
+            next_change_at = override_clears_at
+            next_smart_access = next_interval.access if next_interval is not None else SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN
+            next_schedule_title = next_interval.title if next_interval is not None else None
+        else:
+            next_interval = get_next_smartdoor_pet_schedule_interval(
+                rules,
+                now=now,
+                default_timezone=default_timezone,
+                pet_id=pet_id,
+                include_current=False,
+            )
+            next_change_at = next_interval.start if next_interval is not None else None
+            next_smart_access = next_interval.access if next_interval is not None else None
+            next_schedule_title = next_interval.title if next_interval is not None else None
+
         states[pet_id] = PetSafeExtendedSmartDoorPetScheduleState(
             smart_access=smart_access,
             effective_access=effective_access,
+            override_access=override_access if smartdoor_override_is_active(override_access) else None,
             control_source=control_source,
             active_schedule_title=current_interval.title if current_interval is not None else None,
-            next_change_at=next_interval.start if next_interval is not None else None,
-            next_smart_access=next_interval.access if next_interval is not None else None,
-            next_schedule_title=next_interval.title if next_interval is not None else None,
+            next_change_at=next_change_at,
+            next_smart_access=next_smart_access,
+            next_schedule_title=next_schedule_title,
         )
 
     return states
@@ -297,15 +327,35 @@ def get_current_smartdoor_pet_schedule_interval(
     pet_id: str,
 ) -> PetSafeExtendedSmartDoorPetScheduleInterval | None:
     """Return the current effective schedule interval for a pet."""
+    return get_smartdoor_pet_schedule_interval_at(
+        rules,
+        when=now,
+        default_timezone=default_timezone,
+        pet_id=pet_id,
+    )
+
+
+def get_smartdoor_pet_schedule_interval_at(
+    rules: tuple[PetSafeExtendedSmartDoorScheduleRule, ...],
+    *,
+    when: datetime,
+    default_timezone: tzinfo,
+    pet_id: str,
+) -> PetSafeExtendedSmartDoorPetScheduleInterval | None:
+    """Return the effective schedule interval for a pet at a specific time."""
     intervals = _build_pet_schedule_intervals(
         rules,
         pet_id=pet_id,
-        start=now,
-        end=now,
+        start=when,
+        end=when,
         default_timezone=default_timezone,
     )
     return next(
-        (interval for interval in intervals if interval.start <= now and (interval.end is None or now < interval.end)),
+        (
+            interval
+            for interval in intervals
+            if interval.start <= when and (interval.end is None or when < interval.end)
+        ),
         None,
     )
 
@@ -334,6 +384,64 @@ def get_next_smartdoor_pet_schedule_interval(
         if interval.start > now:
             return interval
     return None
+
+
+def get_next_smartdoor_schedule_trigger(
+    rules: tuple[PetSafeExtendedSmartDoorScheduleRule, ...],
+    *,
+    now: datetime,
+    default_timezone: tzinfo,
+) -> PetSafeExtendedSmartDoorScheduleTrigger | None:
+    """Return the next upcoming SmartDoor schedule trigger across the door."""
+    enabled_rules = tuple(rule for rule in rules if rule.is_enabled and rule.pet_count > 0)
+    if not enabled_rules:
+        return None
+
+    applicable_timezone = _resolve_timezone(
+        next((rule.timezone for rule in enabled_rules if rule.timezone), None),
+        default_timezone,
+    )
+    range_start = _coerce_datetime(now, applicable_timezone)
+    range_end = range_start + timedelta(days=_LOOKAHEAD_DAYS)
+
+    next_trigger: PetSafeExtendedSmartDoorScheduleTrigger | None = None
+    next_key: tuple[datetime, int, str, str] | None = None
+
+    for rule in enabled_rules:
+        parsed_time = _parse_schedule_time(rule.start_time)
+        weekdays = _parse_day_mask(rule.day_of_week)
+        if parsed_time is None or not weekdays:
+            continue
+
+        occurrence = next(
+            (
+                candidate
+                for candidate in _generate_occurrence_starts(
+                    start=range_start,
+                    end=range_end,
+                    weekdays=weekdays,
+                    schedule_time=parsed_time,
+                    timezone=applicable_timezone,
+                )
+                if candidate > range_start
+            ),
+            None,
+        )
+        if occurrence is None:
+            continue
+
+        trigger = PetSafeExtendedSmartDoorScheduleTrigger(
+            start=occurrence,
+            access=rule.access,
+            title=rule.title or "Scheduled access",
+            pet_name=rule.pet_names[0] if rule.pet_names else None,
+        )
+        trigger_key = (occurrence, rule.pet_count, rule.schedule_id, trigger.title)
+        if next_key is None or trigger_key < next_key:
+            next_trigger = trigger
+            next_key = trigger_key
+
+    return next_trigger
 
 
 def expand_smartdoor_pet_schedule_intervals(
@@ -383,14 +491,14 @@ def expand_smartdoor_pet_schedule_intervals(
 
 def format_smartdoor_schedule_interval_summary(interval: PetSafeExtendedSmartDoorPetScheduleInterval) -> str:
     """Return a user-facing calendar event summary for a schedule interval."""
-    access_label = get_smartdoor_schedule_access_label(interval.access)
+    access_label = get_smartdoor_access_label(interval.access)
     title = interval.title or "Scheduled access"
     return f"{access_label} · {title}"
 
 
 def describe_smartdoor_schedule_interval(interval: PetSafeExtendedSmartDoorPetScheduleInterval) -> str | None:
     """Return a user-facing description for a schedule interval."""
-    lines = [f"Access: {get_smartdoor_schedule_access_label(interval.access)}"]
+    lines = [f"Access: {get_smartdoor_access_label(interval.access)}"]
     if interval.title:
         lines.append(f"Source: {interval.title}")
     return "\n".join(lines) if lines else None
@@ -398,16 +506,12 @@ def describe_smartdoor_schedule_interval(interval: PetSafeExtendedSmartDoorPetSc
 
 def normalize_smartdoor_schedule_access(value: Any) -> str:
     """Return a normalized SmartDoor access option from a raw API value."""
-    try:
-        raw_value = int(value)
-    except TypeError, ValueError:
-        return SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN
-    return _ACCESS_VALUE_TO_OPTION.get(raw_value, SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN)
+    return normalize_smartdoor_access_option(value)
 
 
 def get_smartdoor_schedule_access_label(access: str) -> str:
     """Return a user-facing label for a SmartDoor access option."""
-    return _ACCESS_LABELS.get(access, _ACCESS_LABELS[SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN])
+    return get_smartdoor_access_label(access)
 
 
 def _build_pet_schedule_intervals(
@@ -582,12 +686,18 @@ def _build_schedule_id(
     return sha1(seed.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
-def _resolve_effective_pet_access(door_mode: str | None, smart_access: str) -> tuple[str, str]:
+def _resolve_effective_pet_access(
+    door_mode: str | None,
+    smart_access: str,
+    override_access: str | None,
+) -> tuple[str, str]:
     """Return the current effective access after applying the live door mode."""
     if smartdoor_modes_match(door_mode, SMARTDOOR_MODE_MANUAL_UNLOCKED):
         return SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS, SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_UNLOCKED
     if smartdoor_modes_match(door_mode, SMARTDOOR_MODE_MANUAL_LOCKED):
         return SMARTDOOR_SCHEDULE_ACCESS_NO_ACCESS, SMARTDOOR_SCHEDULE_CONTROL_SOURCE_MANUAL_LOCKED
+    if smartdoor_override_is_active(override_access):
+        return override_access or SMARTDOOR_SCHEDULE_ACCESS_UNKNOWN, SMARTDOOR_SCHEDULE_CONTROL_SOURCE_SMART_OVERRIDE
     return smart_access, SMARTDOOR_SCHEDULE_CONTROL_SOURCE_SMART
 
 
