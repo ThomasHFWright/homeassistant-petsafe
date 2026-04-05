@@ -144,7 +144,6 @@ async def async_setup_entry(
     if entities:
         _async_update_sensor_entity_categories(hass, entities)
         async_add_entities(entities)
-        _async_update_sensor_entity_categories(hass, entities)
 
     selected_smartdoor_api_names = {smartdoor.api_name for smartdoor in smartdoors}
     known_unique_ids = {entity.unique_id for entity in entities if entity.unique_id is not None}
@@ -169,6 +168,5 @@ async def async_setup_entry(
         known_unique_ids.update(entity.unique_id for entity in new_entities if entity.unique_id is not None)
         _async_update_sensor_entity_categories(hass, new_entities)
         async_add_entities(new_entities)
-        _async_update_sensor_entity_categories(hass, new_entities)
 
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_smartdoor_pet_sensors))

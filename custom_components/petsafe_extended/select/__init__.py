@@ -63,4 +63,3 @@ async def async_setup_entry(
     if entities:
         _async_update_select_entity_categories(hass, entities)
         async_add_entities(entities)
-        _async_update_select_entity_categories(hass, entities)
