@@ -2,15 +2,39 @@
 
 from __future__ import annotations
 
-from custom_components.petsafe_extended.const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES
+from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DOMAIN,
+)
 from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
 from custom_components.petsafe_extended.utils import filter_selected_devices
 from homeassistant.components.calendar import CalendarEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .smartdoor_schedule import PetSafeExtendedSmartDoorScheduleCalendar
+
+
+def _async_update_calendar_entity_categories(hass: HomeAssistant, entities: list[CalendarEntity]) -> None:
+    """Apply updated calendar entity categories to existing registry entries."""
+    entity_registry = er.async_get(hass)
+
+    for entity in entities:
+        if entity.unique_id is None:
+            continue
+
+        entity_id = entity_registry.async_get_entity_id("calendar", DOMAIN, entity.unique_id)
+        if entity_id is None:
+            continue
+
+        existing_entry = entity_registry.async_get(entity_id)
+        if existing_entry is None or existing_entry.entity_category == entity.entity_category:
+            continue
+
+        entity_registry.async_update_entity(entity_id, entity_category=entity.entity_category)
 
 
 def _build_smartdoor_schedule_calendars(
@@ -36,7 +60,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the calendar platform."""
-    del hass
     if not entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES):
         return
 
@@ -51,6 +74,7 @@ async def async_setup_entry(
 
     entities = _build_smartdoor_schedule_calendars(coordinator, smartdoors)
     if entities:
+        _async_update_calendar_entity_categories(hass, entities)
         async_add_entities(entities)
 
     selected_smartdoor_api_names = {smartdoor.api_name for smartdoor in smartdoors}
@@ -73,6 +97,7 @@ async def async_setup_entry(
             return
 
         known_unique_ids.update(entity.unique_id for entity in new_entities if entity.unique_id is not None)
+        _async_update_calendar_entity_categories(hass, new_entities)
         async_add_entities(new_entities)
 
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_smartdoor_schedule_calendars))

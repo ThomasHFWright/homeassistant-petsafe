@@ -17,6 +17,7 @@ from custom_components import petsafe_extended as integration_module
 from custom_components.petsafe_extended.binary_sensor import async_setup_entry as async_setup_binary_sensor_entry
 from custom_components.petsafe_extended.binary_sensor.smartdoor import (
     SMARTDOOR_AC_POWER_DESCRIPTION,
+    SMARTDOOR_CONNECTIVITY_DESCRIPTION,
     SMARTDOOR_PROBLEM_DESCRIPTION,
     PetSafeExtendedSmartDoorBinarySensor,
 )
@@ -57,6 +58,7 @@ from custom_components.petsafe_extended.coordinator.smartdoor_schedules import (
     SMARTDOOR_SCHEDULE_ACCESS_OPTIONS,
     SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
     build_smartdoor_pet_schedule_states,
+    build_smartdoor_schedule_summary,
     describe_smartdoor_schedule_interval,
     expand_smartdoor_pet_schedule_intervals,
 )
@@ -72,6 +74,10 @@ from custom_components.petsafe_extended.data import (
     PetSafeExtendedSmartDoorScheduleSummary,
 )
 from custom_components.petsafe_extended.diagnostics import async_get_config_entry_diagnostics
+from custom_components.petsafe_extended.entity_utils.smartdoor_access import (
+    SMARTDOOR_ACCESS_SMART_SCHEDULE,
+    SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE,
+)
 from custom_components.petsafe_extended.event import async_setup_entry as async_setup_event_entry
 from custom_components.petsafe_extended.event.smartdoor_activity import PetSafeExtendedSmartDoorActivityEvent
 from custom_components.petsafe_extended.lock import async_setup_entry
@@ -81,6 +87,7 @@ from custom_components.petsafe_extended.select.smartdoor_final_act import PetSaf
 from custom_components.petsafe_extended.select.smartdoor_operating_mode import (
     PetSafeExtendedSmartDoorOperatingModeSelect,
 )
+from custom_components.petsafe_extended.select.smartdoor_override import PetSafeExtendedSmartDoorOverrideSelect
 from custom_components.petsafe_extended.sensor import async_setup_entry as async_setup_sensor_entry
 from custom_components.petsafe_extended.sensor.smartdoor_diagnostic import (
     SMARTDOOR_BATTERY_LEVEL_DESCRIPTION,
@@ -95,7 +102,7 @@ from custom_components.petsafe_extended.sensor.smartdoor_pet import (
 )
 from custom_components.petsafe_extended.sensor.smartdoor_schedule import PetSafeExtendedSmartDoorScheduleSensor
 from homeassistant.const import EntityCategory, Platform
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -112,6 +119,7 @@ def _create_smartdoor(
     rssi: int | None = -40,
     has_adapter: bool | None = False,
     error_state: str | None = None,
+    override_payload: list[dict[str, Any]] | None = None,
 ) -> Any:
     """Construct a SmartDoor device stub with async methods."""
     door = SimpleNamespace()
@@ -142,7 +150,9 @@ def _create_smartdoor(
     door.unlock = AsyncMock()
     door.set_mode = AsyncMock()
     door.set_final_act = AsyncMock()
+    door.override_schedule = AsyncMock()
     door.get_schedules = AsyncMock(return_value=[])
+    door.get_override_schedules = AsyncMock(return_value=override_payload or [{}])
     door.get_preferences = AsyncMock(return_value={})
     return door
 
@@ -491,9 +501,10 @@ async def test_smartdoor_diagnostic_sensor_values(coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_smartdoor_binary_sensor_values(coordinator) -> None:
-    """SmartDoor binary sensors should expose AC power and problem state."""
+    """SmartDoor binary sensors should expose AC power, connectivity, and problem state."""
     door = _create_smartdoor(
         has_adapter=False,
+        connection_status="online",
         error_state="NONE",
     )
     coordinator.data = PetSafeExtendedCoordinatorData(smartdoors=[door])
@@ -503,6 +514,11 @@ async def test_smartdoor_binary_sensor_values(coordinator) -> None:
         door,
         SMARTDOOR_AC_POWER_DESCRIPTION,
     )
+    connectivity_entity = PetSafeExtendedSmartDoorBinarySensor(
+        coordinator,
+        door,
+        SMARTDOOR_CONNECTIVITY_DESCRIPTION,
+    )
     problem_entity = PetSafeExtendedSmartDoorBinarySensor(
         coordinator,
         door,
@@ -511,13 +527,21 @@ async def test_smartdoor_binary_sensor_values(coordinator) -> None:
 
     assert ac_power_entity.is_on is False
     assert ac_power_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert connectivity_entity.is_on is True
+    assert connectivity_entity.available is True
+    assert connectivity_entity.entity_category is EntityCategory.DIAGNOSTIC
+    assert connectivity_entity.extra_state_attributes == {"connection_status": "online"}
     assert problem_entity.is_on is False
     assert problem_entity.extra_state_attributes == {"error_state": "NONE"}
 
     door.has_adapter = True
+    door.connection_status = "offline"
     door.error_state = "SENSOR_BLOCKED"
 
     assert ac_power_entity.is_on is True
+    assert connectivity_entity.is_on is False
+    assert connectivity_entity.available is True
+    assert connectivity_entity.extra_state_attributes == {"connection_status": "offline"}
     assert problem_entity.is_on is True
     assert problem_entity.extra_state_attributes == {"error_state": "SENSOR_BLOCKED"}
 
@@ -540,9 +564,9 @@ async def test_binary_sensor_platform_setup_adds_smartdoor_entities(
 
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
-    assert len(added_entities) == 2
+    assert len(added_entities) == 3
     assert all(isinstance(entity, PetSafeExtendedSmartDoorBinarySensor) for entity in added_entities)
-    assert {entity.entity_description.key for entity in added_entities} == {"ac_power", "problem"}
+    assert {entity.entity_description.key for entity in added_entities} == {"ac_power", "connectivity", "problem"}
 
 
 @pytest.mark.asyncio
@@ -566,15 +590,26 @@ async def test_binary_sensor_platform_updates_existing_diagnostic_entity_categor
         config_entry=mock_config_entry,
         suggested_object_id="pet_door_ac_power",
     )
+    connectivity_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_connectivity",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_connectivity",
+    )
     assert existing_entry.entity_category is None
+    assert connectivity_entry.entity_category is None
 
     async_add_entities = MagicMock()
     with patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])):
         await async_setup_binary_sensor_entry(hass, mock_config_entry, async_add_entities)
 
     updated_entry = entity_reg.async_get(existing_entry.entity_id)
+    updated_connectivity_entry = entity_reg.async_get(connectivity_entry.entity_id)
     assert updated_entry is not None
+    assert updated_connectivity_entry is not None
     assert updated_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_connectivity_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio
@@ -589,7 +624,7 @@ async def test_operating_mode_select_state_and_controls(coordinator) -> None:
 
     assert entity.current_option == "smart"
     assert entity.translation_key == "operating_mode"
-    assert entity.entity_category is EntityCategory.CONFIG
+    assert entity.entity_category is None
 
     await entity.async_select_option("locked")
 
@@ -598,6 +633,46 @@ async def test_operating_mode_select_state_and_controls(coordinator) -> None:
         door.api_name,
         SMARTDOOR_MODE_MANUAL_LOCKED,
     )
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_override_select_state_and_controls(coordinator) -> None:
+    """SmartDoor override select should expose and change the current schedule override."""
+    door = _create_smartdoor()
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        smartdoor_override_options={door.api_name: SMARTDOOR_ACCESS_SMART_SCHEDULE},
+    )
+    updated_door = _create_smartdoor(override_payload=[{"thingName": door.api_name, "access": 3}])
+    coordinator.async_set_smartdoor_override = AsyncMock(return_value=updated_door)
+    coordinator.get_smartdoor_override_option = MagicMock(  # type: ignore[method-assign]
+        side_effect=[SMARTDOOR_ACCESS_SMART_SCHEDULE, "full_access"]
+    )
+
+    entity = PetSafeExtendedSmartDoorOverrideSelect(coordinator, door)
+
+    assert entity.current_option == SMARTDOOR_ACCESS_SMART_SCHEDULE
+    assert entity.translation_key == "smart_override"
+    assert entity.entity_category is None
+
+    await entity.async_select_option("full_access")
+
+    assert entity.current_option == "full_access"
+    coordinator.async_set_smartdoor_override.assert_awaited_once_with(door.api_name, "full_access")
+
+
+@pytest.mark.asyncio
+async def test_smartdoor_override_select_cannot_clear_active_override(coordinator) -> None:
+    """Selecting Smart Schedule should raise until PetSafe exposes a direct clear path."""
+    door = _create_smartdoor(override_payload=[{"thingName": "smartdoor-1", "access": 3}])
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        smartdoor_override_options={door.api_name: "full_access"},
+    )
+    entity = PetSafeExtendedSmartDoorOverrideSelect(coordinator, door)
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_select_option(SMARTDOOR_ACCESS_SMART_SCHEDULE)
 
 
 @pytest.mark.asyncio
@@ -653,7 +728,7 @@ async def test_final_act_select_state_and_controls(coordinator) -> None:
 
 @pytest.mark.asyncio
 async def test_select_platform_adds_smartdoor_selects(hass, mock_config_entry, attach_runtime_data) -> None:
-    """The select platform should add the SmartDoor locked-mode and final-act selects."""
+    """The select platform should add the SmartDoor locked-mode, override, and final-act selects."""
     door = _create_smartdoor(api_name="door-1")
     door.get_activity = AsyncMock(return_value=[])
     coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
@@ -670,16 +745,76 @@ async def test_select_platform_adds_smartdoor_selects(hass, mock_config_entry, a
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
 
-    assert len(added_entities) == 2
+    assert len(added_entities) == 3
     assert any(isinstance(entity, PetSafeExtendedSmartDoorOperatingModeSelect) for entity in added_entities)
+    assert any(isinstance(entity, PetSafeExtendedSmartDoorOverrideSelect) for entity in added_entities)
     assert any(isinstance(entity, PetSafeExtendedSmartDoorFinalActSelect) for entity in added_entities)
-    assert {entity.translation_key for entity in added_entities} == {"operating_mode", "final_act"}
+    assert {entity.translation_key for entity in added_entities} == {
+        "operating_mode",
+        "smart_override",
+        "final_act",
+    }
     operating_mode_entity = next(
         entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorOperatingModeSelect)
     )
     assert operating_mode_entity.options == ["locked", "smart"]
+    override_entity = next(
+        entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorOverrideSelect)
+    )
+    assert override_entity.options == ["smart_schedule", "no_access", "out_only", "in_only", "full_access"]
     assert all(entity.device_info is not None for entity in added_entities)
     assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
+
+
+@pytest.mark.asyncio
+async def test_select_platform_updates_existing_registry_entity_categories(
+    hass,
+    mock_config_entry,
+    attach_runtime_data,
+) -> None:
+    """Existing SmartDoor selects should migrate to their current entity categories."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, MagicMock(), mock_config_entry)
+    mock_config_entry.add_to_hass(hass)
+    attach_runtime_data(mock_config_entry, coordinator)
+
+    entity_reg = er.async_get(hass)
+    operating_mode_entity = PetSafeExtendedSmartDoorOperatingModeSelect(coordinator, door)
+    final_act_entity = PetSafeExtendedSmartDoorFinalActSelect(coordinator, door)
+    assert operating_mode_entity.unique_id is not None
+    assert final_act_entity.unique_id is not None
+
+    locked_mode_entry = entity_reg.async_get_or_create(
+        "select",
+        DOMAIN,
+        operating_mode_entity.unique_id,
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_locked_mode",
+        entity_category=EntityCategory.CONFIG,
+    )
+    power_loss_entry = entity_reg.async_get_or_create(
+        "select",
+        DOMAIN,
+        final_act_entity.unique_id,
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_power_loss_action",
+        entity_category=EntityCategory.CONFIG,
+    )
+
+    async_add_entities = MagicMock()
+    with (
+        patch.object(coordinator, "get_litterboxes", AsyncMock(return_value=[])),
+        patch.object(coordinator, "get_smartdoors", AsyncMock(return_value=[door])),
+    ):
+        await async_setup_select_entry(hass, mock_config_entry, async_add_entities)
+
+    updated_locked_mode_entry = entity_reg.async_get(locked_mode_entry.entity_id)
+    updated_power_loss_entry = entity_reg.async_get(power_loss_entry.entity_id)
+
+    assert updated_locked_mode_entry is not None
+    assert updated_power_loss_entry is not None
+    assert updated_locked_mode_entry.entity_category is None
+    assert updated_power_loss_entry.entity_category is EntityCategory.CONFIG
 
 
 @pytest.mark.asyncio
@@ -710,6 +845,114 @@ async def test_coordinator_get_smartdoors_raises_auth_failed(hass, mock_config_e
 
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator.get_smartdoors()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_applies_smartdoor_override_during_refresh(hass, mock_config_entry) -> None:
+    """A fetched SmartDoor override should update effective per-pet access in the same refresh cycle."""
+    door = _create_smartdoor(
+        api_name="door-1",
+        override_payload=[{"thingName": "door-1", "access": 3}],
+    )
+    door.get_schedules = AsyncMock(
+        return_value=[
+            _create_schedule(
+                title="Cats outside",
+                start_time="08:00",
+                access=1,
+                pet_ids=["pet-1"],
+            )
+        ]
+    )
+    door.get_preferences = AsyncMock(return_value={"tz": "Europe/London"})
+
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_pet_links = AsyncMock(  # noqa: SLF001
+        return_value=PetSafeExtendedPetLinkData(
+            links=(PetSafeExtendedPetProductLink("pet-1", "door-1", "smartdoor"),),
+            pets_by_id={
+                "pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo"),
+            },
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        )
+    )
+    coordinator._async_build_smartdoor_pet_states = AsyncMock(return_value=({}, {}, {}))  # noqa: SLF001
+
+    fixed_now = dt_util.parse_datetime("2026-04-03T09:00:00+01:00")
+    assert fixed_now is not None
+
+    with patch("custom_components.petsafe_extended.coordinator.base.dt_util.now", return_value=fixed_now):
+        await coordinator.async_refresh()
+
+    pet_schedule_state = coordinator.get_smartdoor_pet_schedule_state("door-1", "pet-1")
+
+    assert coordinator.get_smartdoor_override_option("door-1") == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state is not None
+    assert pet_schedule_state.smart_access == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
+    assert pet_schedule_state.effective_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state.override_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state.control_source == SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE
+
+
+@pytest.mark.asyncio
+async def test_coordinator_async_set_smartdoor_override_updates_cached_state(hass, mock_config_entry) -> None:
+    """Setting a SmartDoor override should update the cached override and effective per-pet state."""
+    door = _create_smartdoor(api_name="door-1")
+    door.get_override_schedules = AsyncMock(return_value=[{"thingName": "door-1", "access": 3}])
+    api = MagicMock()
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            links=(PetSafeExtendedPetProductLink("pet-1", "door-1", "smartdoor"),),
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_schedule_rules={
+            "door-1": (
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="cats-out",
+                    title="Cats outside",
+                    start_time="08:00",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
+                    is_enabled=True,
+                    pet_ids=("pet-1",),
+                    pet_names=("Milo",),
+                    pet_count=1,
+                    timezone="Europe/London",
+                ),
+            )
+        },
+        smartdoor_override_options={"door-1": SMARTDOOR_ACCESS_SMART_SCHEDULE},
+    )
+
+    fixed_now = dt_util.parse_datetime("2026-04-03T09:00:00+01:00")
+    assert fixed_now is not None
+
+    with patch("custom_components.petsafe_extended.coordinator.base.dt_util.now", return_value=fixed_now):
+        refreshed_door = await coordinator.async_set_smartdoor_override("door-1", "full_access")
+
+    pet_schedule_state = coordinator.get_smartdoor_pet_schedule_state("door-1", "pet-1")
+
+    assert refreshed_door is door
+    door.override_schedule.assert_awaited_once_with(3, update_data=False)
+    assert coordinator.get_smartdoor_override_option("door-1") == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state is not None
+    assert pet_schedule_state.smart_access == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
+    assert pet_schedule_state.effective_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state.override_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_schedule_state.control_source == SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE
 
 
 @pytest.mark.asyncio
@@ -1154,7 +1397,7 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
     async_add_entities.assert_called_once()
     added_entities = async_add_entities.call_args[0][0]
 
-    assert len(added_entities) == 15
+    assert len(added_entities) == 16
     diagnostic_entities = [
         entity for entity in added_entities if isinstance(entity, PetSafeExtendedSmartDoorDiagnosticSensor)
     ]
@@ -1164,12 +1407,18 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
     ]
     assert len(diagnostic_entities) == 3
     assert len(pet_entities) == 10
-    assert len(schedule_entities) == 2
+    assert len(schedule_entities) == 3
     assert {entity.entity_description.key for entity in diagnostic_entities} == {
         "battery_level",
         "battery_voltage",
         "signal_strength",
     }
+    assert {entity.entity_description.key for entity in schedule_entities} == {
+        "schedule_rule_count",
+        "active_schedule_rule_count",
+        "scheduled_pet_count",
+    }
+    assert all(entity.entity_category is EntityCategory.DIAGNOSTIC for entity in schedule_entities)
     activity_entities = [entity for entity in pet_entities if entity.entity_description.key == "last_activity"]
     access_entities = [entity for entity in pet_entities if entity.entity_description.key == "smart_access"]
     next_access_entities = [entity for entity in pet_entities if entity.entity_description.key == "next_smart_access"]
@@ -1182,8 +1431,12 @@ async def test_sensor_platform_adds_smartdoor_pet_sensors(hass, mock_config_entr
     assert all(entity.device_info["identifiers"] == {("petsafe_extended", "door-1")} for entity in added_entities)
     assert all(entity.translation_key == "last_activity" for entity in activity_entities)
     assert activity_entities[0].extra_state_attributes["technology"] == "MICROCHIP"
-    schedule_values = sorted(entity.native_value for entity in schedule_entities)
-    assert schedule_values == [2, 2]
+    schedule_values = {entity.entity_description.key: entity.native_value for entity in schedule_entities}
+    assert schedule_values == {
+        "schedule_rule_count": 2,
+        "active_schedule_rule_count": 2,
+        "scheduled_pet_count": 2,
+    }
 
 
 @pytest.mark.asyncio
@@ -1319,6 +1572,60 @@ async def test_schedule_pet_sensor_availability_uses_scheduled_pet_membership(co
 
 
 @pytest.mark.asyncio
+async def test_smartdoor_pet_sensor_reports_override_in_attributes(coordinator) -> None:
+    """Schedule-derived pet sensors should expose override details without changing schedule state."""
+    door = _create_smartdoor(api_name="door-1")
+    coordinator.data = PetSafeExtendedCoordinatorData(
+        smartdoors=[door],
+        pet_links=PetSafeExtendedPetLinkData(
+            pet_ids_by_product_id={"door-1": ("pet-1",)},
+            product_ids_by_pet_id={"pet-1": ("door-1",)},
+            pets_by_id={"pet-1": PetSafeExtendedPetProfile(pet_id="pet-1", name="Milo")},
+            product_type_by_product_id={"door-1": "smartdoor"},
+        ),
+        smartdoor_schedule_rules={
+            "door-1": (
+                PetSafeExtendedSmartDoorScheduleRule(
+                    schedule_id="cats-out",
+                    title="Cats outside",
+                    start_time="08:00",
+                    day_of_week="1111111",
+                    access=SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
+                    is_enabled=True,
+                    pet_ids=("pet-1",),
+                    pet_names=("Milo",),
+                    pet_count=1,
+                    timezone="Europe/London",
+                ),
+            )
+        },
+        smartdoor_pet_schedule_states={
+            "door-1": {
+                "pet-1": PetSafeExtendedSmartDoorPetScheduleState(
+                    smart_access=SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
+                    effective_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    override_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+                    control_source=SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE,
+                    active_schedule_title="Cats outside",
+                )
+            }
+        },
+    )
+
+    entity = PetSafeExtendedSmartDoorPetSensor(
+        coordinator,
+        door,
+        "pet-1",
+        SMARTDOOR_PET_SMART_ACCESS_DESCRIPTION,
+    )
+
+    assert entity.native_value == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
+    assert entity.extra_state_attributes["effective_access"] == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert entity.extra_state_attributes["override_access"] == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert entity.extra_state_attributes["control_source"] == SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE
+
+
+@pytest.mark.asyncio
 async def test_sensor_platform_updates_existing_diagnostic_entity_categories(
     hass,
     mock_config_entry,
@@ -1401,6 +1708,7 @@ async def test_calendar_platform_adds_smartdoor_schedule_calendar(
 
     assert len(added_entities) == 1
     assert isinstance(added_entities[0], PetSafeExtendedSmartDoorScheduleCalendar)
+    assert added_entities[0].entity_category is EntityCategory.DIAGNOSTIC
     assert added_entities[0].device_info is not None
     assert added_entities[0].device_info["identifiers"] == {("petsafe_extended", "door-1")}
     assert added_entities[0].name == "Milo Schedule"
@@ -2013,12 +2321,83 @@ def test_smartdoor_schedule_projection_keeps_pet_timelines_independent() -> None
         rules,
         ("dog-1", "cat-2"),
         door_mode=SMARTDOOR_MODE_SMART,
+        override_access=None,
         now=now,
         default_timezone=now.tzinfo,
     )
     assert pet_states["dog-1"].smart_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
     assert pet_states["cat-2"].smart_access == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
     assert pet_states["cat-2"].next_smart_access == SMARTDOOR_SCHEDULE_ACCESS_IN_ONLY
+
+
+def test_build_smartdoor_pet_schedule_states_applies_override() -> None:
+    """Active SmartDoor overrides should replace effective access while preserving schedule state."""
+    now = dt_util.parse_datetime("2026-04-06T09:00:00+01:00")
+    assert now is not None
+    assert now.tzinfo is not None
+    rule = PetSafeExtendedSmartDoorScheduleRule(
+        schedule_id="cats-out",
+        title="Cats outside",
+        start_time="08:00",
+        day_of_week="1111111",
+        access=SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY,
+        is_enabled=True,
+        pet_ids=("cat-1",),
+        pet_names=("Milo",),
+        pet_count=1,
+        timezone="Europe/London",
+    )
+
+    pet_states = build_smartdoor_pet_schedule_states(
+        (rule,),
+        ("cat-1",),
+        door_mode=SMARTDOOR_MODE_SMART,
+        override_access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+        now=now,
+        default_timezone=now.tzinfo,
+    )
+
+    assert pet_states["cat-1"].smart_access == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
+    assert pet_states["cat-1"].effective_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_states["cat-1"].override_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert pet_states["cat-1"].control_source == SMARTDOOR_CONTROL_SOURCE_SMART_OVERRIDE
+    assert pet_states["cat-1"].next_smart_access == SMARTDOOR_SCHEDULE_ACCESS_OUT_ONLY
+    assert pet_states["cat-1"].next_schedule_title == "Cats outside"
+    assert pet_states["cat-1"].next_change_at == dt_util.parse_datetime("2026-04-07T08:00:00+01:00")
+
+
+def test_build_smartdoor_schedule_summary_tracks_next_single_rule_trigger() -> None:
+    """Single repeating schedules should still expose the next trigger in the summary view."""
+    now = dt_util.parse_datetime("2026-04-06T09:00:00+01:00")
+    assert now is not None
+    assert now.tzinfo is not None
+    rule = PetSafeExtendedSmartDoorScheduleRule(
+        schedule_id="dogs-all-day",
+        title="Dogs in and out",
+        start_time="08:00",
+        day_of_week="1111111",
+        access=SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS,
+        is_enabled=True,
+        pet_ids=("dog-1",),
+        pet_names=("Frank",),
+        pet_count=1,
+        timezone="Europe/London",
+    )
+
+    summary = build_smartdoor_schedule_summary(
+        (rule,),
+        ("dog-1",),
+        now=now,
+        default_timezone=now.tzinfo,
+    )
+
+    assert summary.schedule_rule_count == 1
+    assert summary.enabled_schedule_count == 1
+    assert summary.scheduled_pet_count == 1
+    assert summary.next_schedule_change_at == dt_util.parse_datetime("2026-04-07T08:00:00+01:00")
+    assert summary.next_schedule_title == "Dogs in and out"
+    assert summary.next_schedule_access == SMARTDOOR_SCHEDULE_ACCESS_FULL_ACCESS
+    assert summary.next_schedule_pet_name == "Frank"
 
 
 @pytest.mark.asyncio
@@ -2393,7 +2772,14 @@ def test_entry_platforms_skip_calendar_when_schedules_disabled(mock_config_entry
 
     platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
 
-    assert platforms == [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
+    assert platforms == [
+        Platform.SENSOR,
+        Platform.BINARY_SENSOR,
+        Platform.BUTTON,
+        Platform.SELECT,
+        Platform.EVENT,
+        Platform.LOCK,
+    ]
 
 
 def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, mock_config_entry) -> None:
@@ -2450,6 +2836,13 @@ def test_update_diagnostic_entity_categories_updates_existing_registry_entries(h
         config_entry=mock_config_entry,
         suggested_object_id="pet_door_ac_power",
     )
+    connectivity_entry = entity_reg.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        "door-1_connectivity",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_connectivity",
+    )
     battery_entry = entity_reg.async_get_or_create(
         "sensor",
         DOMAIN,
@@ -2457,18 +2850,55 @@ def test_update_diagnostic_entity_categories_updates_existing_registry_entries(h
         config_entry=mock_config_entry,
         suggested_object_id="pet_door_battery_level",
     )
+    schedule_rule_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_schedule_rule_count",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_schedule_rule_count",
+    )
+    active_schedule_rule_entry = entity_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "door-1_active_schedule_rule_count",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_active_schedule_rule_count",
+    )
+    calendar_entry = entity_reg.async_get_or_create(
+        "calendar",
+        DOMAIN,
+        "door-1_pet-1_schedule",
+        config_entry=mock_config_entry,
+        suggested_object_id="pet_door_milo_schedule",
+    )
 
     assert ac_power_entry.entity_category is None
+    assert connectivity_entry.entity_category is None
     assert battery_entry.entity_category is None
+    assert schedule_rule_entry.entity_category is None
+    assert active_schedule_rule_entry.entity_category is None
+    assert calendar_entry.entity_category is None
 
     integration_module._async_update_diagnostic_entity_categories(hass, mock_config_entry)  # noqa: SLF001
 
     updated_ac_power_entry = entity_reg.async_get(ac_power_entry.entity_id)
+    updated_connectivity_entry = entity_reg.async_get(connectivity_entry.entity_id)
     updated_battery_entry = entity_reg.async_get(battery_entry.entity_id)
+    updated_schedule_rule_entry = entity_reg.async_get(schedule_rule_entry.entity_id)
+    updated_active_schedule_rule_entry = entity_reg.async_get(active_schedule_rule_entry.entity_id)
+    updated_calendar_entry = entity_reg.async_get(calendar_entry.entity_id)
     assert updated_ac_power_entry is not None
+    assert updated_connectivity_entry is not None
     assert updated_battery_entry is not None
+    assert updated_schedule_rule_entry is not None
+    assert updated_active_schedule_rule_entry is not None
+    assert updated_calendar_entry is not None
     assert updated_ac_power_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_connectivity_entry.entity_category is EntityCategory.DIAGNOSTIC
     assert updated_battery_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_schedule_rule_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_active_schedule_rule_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert updated_calendar_entry.entity_category is EntityCategory.DIAGNOSTIC
 
 
 @pytest.mark.asyncio

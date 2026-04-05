@@ -8,7 +8,6 @@ from custom_components.petsafe_extended.const import SMARTDOOR_MODE_MANUAL_LOCKE
 from custom_components.petsafe_extended.entity.smartdoor_control import PetSafeExtendedSmartDoorControlEntity
 from custom_components.petsafe_extended.utils.smartdoor import get_smartdoor_locked_mode_option
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
-from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 
 SMARTDOOR_OPERATING_MODE_OPTIONS = ["locked", "smart"]
@@ -18,7 +17,6 @@ SMARTDOOR_OPERATING_MODE_DESCRIPTION = SelectEntityDescription(
     name="Locked Mode",
     translation_key="operating_mode",
     options=SMARTDOOR_OPERATING_MODE_OPTIONS,
-    entity_category=EntityCategory.CONFIG,
 )
 
 _OPTION_TO_MODE = {

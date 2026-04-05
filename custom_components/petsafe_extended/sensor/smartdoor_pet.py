@@ -118,6 +118,7 @@ class PetSafeExtendedSmartDoorPetSensor(SensorEntity, PetSafeExtendedSmartDoorPe
 
         attributes = {
             "effective_access": schedule_state.effective_access,
+            "override_access": schedule_state.override_access,
             "control_source": schedule_state.control_source,
             "active_schedule_title": schedule_state.active_schedule_title,
             "next_smart_access": schedule_state.next_smart_access,

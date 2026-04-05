@@ -15,12 +15,14 @@ from custom_components.petsafe_extended.coordinator.smartdoor_schedules import (
 )
 from custom_components.petsafe_extended.entity.smartdoor_pet import PetSafeExtendedSmartDoorPetEntity
 from homeassistant.components.calendar import CalendarEntity, CalendarEntityDescription, CalendarEvent
+from homeassistant.const import EntityCategory
 from homeassistant.util import dt as dt_util
 
 SMARTDOOR_SCHEDULE_CALENDAR_DESCRIPTION = CalendarEntityDescription(
     key="schedule",
     name="Schedule",
     translation_key="schedule",
+    entity_category=EntityCategory.DIAGNOSTIC,
 )
 
 

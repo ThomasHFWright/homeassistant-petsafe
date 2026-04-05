@@ -27,6 +27,7 @@ from .smartdoor_pet import (
     PetSafeExtendedSmartDoorPetSensor,
 )
 from .smartdoor_schedule import (
+    SMARTDOOR_ACTIVE_SCHEDULE_RULE_COUNT_DESCRIPTION,
     SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
     SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
     PetSafeExtendedSmartDoorScheduleSensor,
@@ -135,6 +136,7 @@ async def async_setup_entry(
             for smartdoor in smartdoors
             for description in (
                 SMARTDOOR_SCHEDULE_RULE_COUNT_DESCRIPTION,
+                SMARTDOOR_ACTIVE_SCHEDULE_RULE_COUNT_DESCRIPTION,
                 SMARTDOOR_SCHEDULE_SCHEDULED_PET_COUNT_DESCRIPTION,
             )
         )
