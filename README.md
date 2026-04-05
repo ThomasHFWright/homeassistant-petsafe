@@ -53,6 +53,28 @@ This repository is intended to be added as a custom HACS integration repository.
 4. Select which feeders, litter boxes, and SmartDoors to include.
 5. Optionally enable or disable SmartDoor schedule entities in the integration options flow.
 
+## Migration From The Original Integration
+
+Migrating from [`dcmeglio/homeassistant-petsafe`](https://github.com/dcmeglio/homeassistant-petsafe) has breaking
+changes.
+
+- The original integration domain is `petsafe`; this fork uses `petsafe_extended`
+- Home Assistant will treat this as a completely separate integration
+- Existing devices and entities from the original integration are not reused or migrated
+- Existing automations, dashboards, helpers, and service calls that reference the old entities will need to be
+  updated
+
+Recommended migration path:
+
+1. Remove or uninstall the original `petsafe` integration from Home Assistant.
+2. Restart Home Assistant.
+3. Install `petsafe_extended` and complete setup again.
+4. Re-select your feeders, litter boxes, and SmartDoors during setup.
+5. Update any automations, dashboards, or scripts to use the new entity IDs and `petsafe_extended.*` service names.
+
+For feeder and litter box users, device-side settings and cloud-stored schedules remain in your PetSafe account, but
+Home Assistant will create new devices and new entities for them under this integration.
+
 ## Supported Devices
 
 ### SmartFeed feeders

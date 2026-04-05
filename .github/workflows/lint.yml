@@ -3,10 +3,12 @@ name: Lint
 on:
   push:
     branches:
-      - "main"
+      - "dev"
+      - "master"
   pull_request:
     branches:
-      - "main"
+      - "dev"
+      - "master"
 
 permissions: {}
 
