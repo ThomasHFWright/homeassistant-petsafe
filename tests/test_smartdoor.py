@@ -2772,7 +2772,14 @@ def test_entry_platforms_skip_calendar_when_schedules_disabled(mock_config_entry
 
     platforms = integration_module._get_entry_platforms(smartdoor_entry)  # noqa: SLF001
 
-    assert platforms == [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT, Platform.EVENT, Platform.LOCK]
+    assert platforms == [
+        Platform.SENSOR,
+        Platform.BINARY_SENSOR,
+        Platform.BUTTON,
+        Platform.SELECT,
+        Platform.EVENT,
+        Platform.LOCK,
+    ]
 
 
 def test_remove_schedule_entities_removes_only_schedule_registry_entries(hass, mock_config_entry) -> None:

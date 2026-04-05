@@ -96,7 +96,7 @@ def _get_entry_platforms(entry: ConfigEntry) -> list[Platform]:
     if (
         _entry_has_selected_devices(entry, "feeders")
         or _entry_has_selected_devices(entry, "litterboxes")
-        or (_entry_has_selected_devices(entry, "smartdoors") and schedules_enabled)
+        or _entry_has_selected_devices(entry, "smartdoors")
     ):
         platforms.append(Platform.BUTTON)
     if _entry_has_selected_devices(entry, "litterboxes") or _entry_has_selected_devices(entry, "smartdoors"):
