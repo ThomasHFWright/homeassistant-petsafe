@@ -1204,6 +1204,102 @@ async def test_coordinator_smartdoor_activity_does_not_replay_startup_history(ha
 
 
 @pytest.mark.asyncio
+async def test_coordinator_smartdoor_activity_does_not_dispatch_exact_replays(
+    hass,
+    mock_config_entry,
+) -> None:
+    """A repeated SmartDoor activity batch should not be dispatched again."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    repeated_activity = [
+        _create_activity_item("CLOUD_MODE_CHANGE_LOCKED", "2026-04-02T17:38:10.738Z"),
+        _create_activity_item("CLOUD_MODE_CHANGE_UNLOCKED", "2026-04-02T17:38:16.233Z"),
+    ]
+    door.get_activity = AsyncMock(side_effect=[repeated_activity, repeated_activity])
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+    observed_records: list[PetSafeExtendedSmartDoorActivityRecord] = []
+    coordinator.async_subscribe_smartdoor_activity("door-1", observed_records.append)
+
+    with (
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pets",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        await coordinator.async_refresh()
+        assert observed_records == []
+
+        coordinator._smartdoor_activity_last_refresh_by_door["door-1"] = (  # noqa: SLF001
+            time.monotonic() - SMARTDOOR_ACTIVITY_REFRESH_INTERVAL.total_seconds()
+        )
+        await coordinator.async_refresh()
+
+    assert observed_records == []
+
+
+@pytest.mark.asyncio
+async def test_coordinator_smartdoor_activity_dispatches_only_truly_new_records(
+    hass,
+    mock_config_entry,
+) -> None:
+    """A replayed SmartDoor batch plus one new record should dispatch only the new record."""
+    door = _create_smartdoor(api_name="door-1")
+    door.data["productId"] = "door-1"
+    seeded_activity = [
+        _create_activity_item("CLOUD_MODE_CHANGE_LOCKED", "2026-04-02T17:38:10.738Z"),
+        _create_activity_item("CLOUD_MODE_CHANGE_UNLOCKED", "2026-04-02T17:38:16.233Z"),
+    ]
+    replay_plus_new_activity = [
+        *seeded_activity,
+        _create_activity_item("PET_EXITED", "2026-04-02T17:46:27.624Z", pet_id="pet-1"),
+    ]
+    door.get_activity = AsyncMock(side_effect=[seeded_activity, replay_plus_new_activity])
+    api = MagicMock()
+    api.get_feeders = AsyncMock(return_value=[])
+    api.get_litterboxes = AsyncMock(return_value=[])
+    api.get_smartdoors = AsyncMock(return_value=[door])
+    coordinator = PetSafeExtendedDataUpdateCoordinator(hass, api, mock_config_entry)
+    coordinator._async_build_feeder_details = AsyncMock(return_value={})  # noqa: SLF001
+    coordinator._async_build_litterbox_details = AsyncMock(return_value={})  # noqa: SLF001
+    observed_records: list[PetSafeExtendedSmartDoorActivityRecord] = []
+    coordinator.async_subscribe_smartdoor_activity("door-1", observed_records.append)
+
+    with (
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pets",
+            AsyncMock(return_value=[{"petId": "pet-1", "profile": {"name": "Frank"}}]),
+        ),
+        patch(
+            "custom_components.petsafe_extended.coordinator.pet_links.async_list_pet_products",
+            AsyncMock(return_value=[{"productId": "door-1", "productType": "SmartDoor"}]),
+        ),
+    ):
+        await coordinator.async_refresh()
+        assert observed_records == []
+
+        coordinator._smartdoor_activity_last_refresh_by_door["door-1"] = (  # noqa: SLF001
+            time.monotonic() - SMARTDOOR_ACTIVITY_REFRESH_INTERVAL.total_seconds()
+        )
+        await coordinator.async_refresh()
+
+    assert [record.code for record in observed_records] == ["PET_EXITED"]
+    assert [record.event_type for record in observed_records] == [SMARTDOOR_EVENT_TYPE_PET_EXITED]
+    pet_state = coordinator.get_smartdoor_pet_state("door-1", "pet-1")
+    assert pet_state is not None
+    assert pet_state.last_activity == SMARTDOOR_PET_ACTIVITY_EXITED
+
+
+@pytest.mark.asyncio
 async def test_coordinator_dispatches_multiple_smartdoor_events_in_order(hass, mock_config_entry) -> None:
     """New SmartDoor records from a single poll should all be dispatched in timestamp order."""
     door = _create_smartdoor(api_name="door-1")

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 import time
 from typing import TYPE_CHECKING, Any, cast
@@ -38,12 +39,15 @@ from custom_components.petsafe_extended.coordinator.pet_links import (
     copy_pet_link_data,
 )
 from custom_components.petsafe_extended.coordinator.smartdoor_activity import (
+    SMARTDOOR_ACTIVITY_EMITTED_KEY_LIMIT,
     SMARTDOOR_ACTIVITY_INITIAL_LIMIT,
+    SmartDoorActivityRecordKey,
     apply_activity_records,
     copy_smartdoor_activity_records,
     copy_smartdoor_pet_states,
     extract_cursor,
     get_new_activity_records,
+    get_smartdoor_activity_record_key,
     merge_activity_records,
     parse_smartdoor_activity_records,
     seed_pet_states,
@@ -125,6 +129,8 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
         self._smartdoor_activity_cursor_by_door: dict[str, str] = {}
         self._smartdoor_activity_last_refresh_by_door: dict[str, float] = {}
         self._smartdoor_pet_states: dict[str, dict[str, PetSafeExtendedSmartDoorPetState]] = {}
+        self._smartdoor_emitted_activity_keys_by_door: dict[str, set[SmartDoorActivityRecordKey]] = {}
+        self._smartdoor_emitted_activity_key_order_by_door: dict[str, deque[SmartDoorActivityRecordKey]] = {}
         self._smartdoor_schedule_rules: dict[str, tuple[PetSafeExtendedSmartDoorScheduleRule, ...]] = {}
         self._smartdoor_schedule_summaries: dict[str, PetSafeExtendedSmartDoorScheduleSummary] = {}
         self._smartdoor_override_options: dict[str, str] = {}
@@ -282,6 +288,59 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
     def _cleanup_force_refresh_keys(force_refresh_keys: set[str], active_keys: set[str]) -> None:
         """Drop forced-refresh markers for devices that no longer exist."""
         force_refresh_keys.intersection_update(active_keys)
+
+    def _cleanup_smartdoor_emitted_activity_keys(self, active_keys: set[str]) -> None:
+        """Drop emitted-activity replay guards for doors that no longer exist."""
+        for api_name in tuple(self._smartdoor_emitted_activity_keys_by_door):
+            if api_name not in active_keys:
+                self._smartdoor_emitted_activity_keys_by_door.pop(api_name, None)
+        for api_name in tuple(self._smartdoor_emitted_activity_key_order_by_door):
+            if api_name not in active_keys:
+                self._smartdoor_emitted_activity_key_order_by_door.pop(api_name, None)
+
+    def _remember_smartdoor_activity_records(
+        self,
+        api_name: str,
+        records: Sequence[PetSafeExtendedSmartDoorActivityRecord],
+    ) -> None:
+        """Record emitted or seeded SmartDoor activity keys for replay suppression."""
+        if not records:
+            return
+
+        emitted_keys = self._smartdoor_emitted_activity_keys_by_door.setdefault(api_name, set())
+        emitted_order = self._smartdoor_emitted_activity_key_order_by_door.setdefault(api_name, deque())
+
+        for record in records:
+            record_key = get_smartdoor_activity_record_key(record)
+            if record_key in emitted_keys:
+                continue
+
+            emitted_keys.add(record_key)
+            emitted_order.append(record_key)
+
+        while len(emitted_order) > SMARTDOOR_ACTIVITY_EMITTED_KEY_LIMIT:
+            oldest_key = emitted_order.popleft()
+            emitted_keys.discard(oldest_key)
+
+    def _get_unemitted_smartdoor_activity_records(
+        self,
+        api_name: str,
+        records: Sequence[PetSafeExtendedSmartDoorActivityRecord],
+    ) -> list[PetSafeExtendedSmartDoorActivityRecord]:
+        """Return SmartDoor activity records that have not already been emitted for a door."""
+        emitted_keys = self._smartdoor_emitted_activity_keys_by_door.setdefault(api_name, set())
+        new_keys_this_cycle: set[SmartDoorActivityRecordKey] = set()
+        fresh_records: list[PetSafeExtendedSmartDoorActivityRecord] = []
+
+        for record in records:
+            record_key = get_smartdoor_activity_record_key(record)
+            if record_key in emitted_keys or record_key in new_keys_this_cycle:
+                continue
+
+            new_keys_this_cycle.add(record_key)
+            fresh_records.append(record)
+
+        return fresh_records
 
     def _cached_feeders_for_update(self) -> list[Any]:
         """Return the current feeder cache for a coordinator refresh cycle."""
@@ -1237,10 +1296,14 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             )
             if since is None:
                 dispatch_records_by_door[door_api_name] = ()
+                self._remember_smartdoor_activity_records(door_api_name, parsed_records)
             else:
-                dispatch_records_by_door[door_api_name] = tuple(
-                    get_new_activity_records(previous_door_records, parsed_records)
+                fresh_records = self._get_unemitted_smartdoor_activity_records(
+                    door_api_name,
+                    get_new_activity_records(previous_door_records, parsed_records),
                 )
+                dispatch_records_by_door[door_api_name] = tuple(fresh_records)
+                self._remember_smartdoor_activity_records(door_api_name, parsed_records)
 
             cursor = extract_cursor(activity_items, self._smartdoor_activity_cursor_by_door.get(door_api_name))
             if cursor is not None:
@@ -1251,6 +1314,7 @@ class PetSafeExtendedDataUpdateCoordinator(DataUpdateCoordinator[PetSafeExtended
             if api_name not in current_door_ids:
                 self._smartdoor_activity_cursor_by_door.pop(api_name, None)
         self._cleanup_timestamp_map(self._smartdoor_activity_last_refresh_by_door, current_door_ids)
+        self._cleanup_smartdoor_emitted_activity_keys(current_door_ids)
 
         return activity_records, pet_states, dispatch_records_by_door
 
