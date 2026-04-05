@@ -27,7 +27,7 @@ The integration uses the [`petsafe-api`](https://pypi.org/project/petsafe-api) P
 
 - One config flow for PetSafe cloud login using an emailed confirmation code
 - Device selection during setup for feeders, litter boxes, and SmartDoors
-- SmartDoor lock, control, event, per-pet, schedule, and diagnostic entities
+- SmartDoor lock, control, override, per-pet, schedule, activity, and diagnostic entities
 - Optional SmartDoor schedule entities that can be turned off in integration options
 - Manual maintenance refresh buttons for slow-changing schedule and pet-link data
 - Feeder service actions for feeding and feeding schedule management
@@ -87,7 +87,7 @@ All SmartDoor entities attach to the same physical SmartDoor device in Home Assi
 Core door entities:
 
 - Lock: `Door`
-- Selects: `Locked Mode`, `Power Loss Action`
+- Selects: `Locked Mode`, `Smart Override`, `Power Loss Action`
 - Events: door-wide `Activity`
 
 Per-pet entities:
@@ -99,17 +99,17 @@ Optional SmartDoor schedule entities:
 
 - Per-pet calendars: `Schedule`
 - Per-pet sensors: `Smart Access`, `Next Smart Access`, `Next Smart Access Change`
-- Door-level sensors: `Schedule Rule Count`, `Scheduled Pet Count`
+- Door-level sensors: `Schedule Rule Count`, `Active Schedule Rule Count`, `Scheduled Pet Count`
 
 SmartDoor diagnostics:
 
-- Binary sensors: `AC Power`, `Problem`
+- Binary sensors: `AC Power`, `Connectivity`, `Problem`
 - Sensors: `Battery Level`, `Battery Voltage`, `Signal Strength`
 
 SmartDoor maintenance buttons:
 
 - `Refresh Pet Data`
-- `Refresh Schedule Data`
+- `Refresh Schedule Data` when schedule entities are enabled
 
 ## SmartDoor Schedules
 
@@ -121,15 +121,28 @@ When enabled, the integration exposes:
 - the current scheduled Smart access for each pet
 - the next scheduled Smart access value for each pet
 - the next scheduled Smart access change timestamp for each pet
+- schedule summary diagnostics on the SmartDoor device
 
 If you do not want schedule entities, disable `Enable SmartDoor schedules` in the options flow. Doing so removes the
-schedule calendars and schedule-derived sensors and stops the related schedule polling.
+schedule calendars and schedule-derived sensors, hides the SmartDoor `Refresh Schedule Data` button, and stops the
+related schedule polling. `Refresh Pet Data`, per-pet activity, controls, and diagnostics remain available.
+
+## SmartDoor Override
+
+`Smart Override` temporarily applies one access mode to all pets while the door remains in Smart mode.
+
+- Available options: `Smart Schedule`, `No access`, `Out only`, `In only`, `Full access`
+- An active override clears when the next schedule event occurs
+- `Smart Schedule` reflects the normal cleared state
+- The PetSafe API does not currently expose a direct clear action, so an active override must expire naturally or be
+  cleared in the PetSafe app
 
 ## Refresh Behavior
 
 The integration uses different refresh cadences depending on how often the data changes:
 
 - SmartDoor activity: every 30 seconds
+- SmartDoor override state: every 30 seconds
 - Feeder state and last feeding: every 60 seconds
 - Litter box state and activity: every 60 seconds
 - Feeder schedules: every 30 minutes
@@ -147,6 +160,7 @@ Manual refresh options are available for slower data:
 
 - This is a cloud-polling integration.
 - SmartDoor diagnostics expose power outages through `AC Power`, which turns off when the door is running on battery.
+- SmartDoor `Connectivity` stays available and reports `off` when the door is offline.
 - SmartDoor schedule and pet entities are added dynamically as new pets or new schedules appear.
 
 ## Credits
