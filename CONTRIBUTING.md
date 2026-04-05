@@ -13,12 +13,14 @@ GitHub is used to host code, to track issues and feature requests, as well as ac
 
 Pull requests are the best way to propose changes to the codebase.
 
-1. Fork the repo and create your branch from `main`.
+1. Fork the repo and create your branch from `dev`.
 2. Run `script/setup/bootstrap` to install dependencies and pre-commit hooks.
 3. If you've changed something, update the documentation.
-4. Make sure your code passes all checks (using `script/check` for linting and type checking).
+4. Make sure your code passes all checks (use `script/check`, and also `script/check-critical` for auth, polling, or SmartDoor changes).
 5. Test your contribution.
 6. Issue that pull request!
+
+Day-to-day feature and fix PRs target `dev`. Releases are prepared by merging `dev` into `master`.
 
 ## Any contributions you make will be under the MIT Software License
 
@@ -75,7 +77,7 @@ See the [prompts README](./.github/prompts/README.md) for details on using these
 
 ## Code Quality
 
-This blueprint follows Home Assistant's [integration quality standards](https://developers.home-assistant.io/docs/core/integration-quality-scale/) as best practices. The code includes:
+This project follows Home Assistant's [integration quality standards](https://developers.home-assistant.io/docs/core/integration-quality-scale/) as practical best practices. The code includes:
 
 - ✅ Comprehensive docstrings with links to official documentation
 - ✅ Full type hints for better IDE support
@@ -83,7 +85,7 @@ This blueprint follows Home Assistant's [integration quality standards](https://
 - ✅ Proper error handling and entity unavailability
 - ✅ Coordinator pattern for efficient data fetching
 
-**Don't worry!** You don't need to maintain all of this. The blueprint gives you a solid, well-documented starting point. Feel free to simplify or adapt anything to your needs - the goal is to help you get started quickly with good patterns, not to overwhelm you with requirements.
+Use these as guardrails, not ceremony. The goal is to keep contributions easy to review and safe to release.
 
 ## Test your code modification
 
@@ -93,6 +95,8 @@ Home Assistant instance running and already configured with the included
 [`configuration.yaml`](./config/configuration.yaml) file.
 
 You can also run tests using `script/test` to ensure your changes don't break existing functionality.
+
+If you change runtime behavior, start Home Assistant with `script/develop` and validate the affected entities or flows before opening your PR.
 
 ## License
 

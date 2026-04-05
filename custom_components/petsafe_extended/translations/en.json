@@ -1,7 +1,8 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Device is already configured"
+            "already_configured": "Device is already configured",
+            "reauth_successful": "Reauthentication successful"
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -18,14 +19,169 @@
             "code": {
                 "description": "Check your email for the confirmation code",
                 "data": {
-                  "code": "Confirmation Code"
+                    "code": "Confirmation Code"
                 }
-              },
+            },
+            "reauth_confirm": {
+                "description": "Check {email} for the new confirmation code",
+                "data": {
+                    "code": "Confirmation Code"
+                }
+            },
             "devices": {
                 "data": {
                     "feeders": "Feeders",
                     "litterboxes": "Litterboxes",
                     "smartdoors": "SmartDoors"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "enable_smartdoor_schedules": "Enable SmartDoor schedules"
+                }
+            }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "ac_power": {
+        "name": "AC Power"
+      },
+      "connectivity": {
+        "name": "Connectivity"
+      },
+      "problem": {
+        "name": "Problem"
+      }
+    },
+    "button": {
+      "refresh_feeding_schedule_data": {
+        "name": "Refresh Schedule Data"
+      },
+      "refresh_pet_data": {
+        "name": "Refresh Pet Data"
+      },
+      "refresh_schedule_data": {
+        "name": "Refresh Schedule Data"
+      }
+    },
+        "calendar": {
+            "schedule": {
+                "name": "Schedule"
+            }
+        },
+        "event": {
+            "activity": {
+                "name": "Activity",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "pet_entered": "Pet entered",
+                            "pet_exited": "Pet exited",
+                            "pet_activity": "Pet activity",
+                            "schedule_started": "Schedule started",
+                            "mode_changed": "Mode changed",
+                            "door_error": "Door error",
+                            "other": "Other activity"
+                        }
+                    },
+                    "event_subtype": {
+                        "state": {
+                            "pet_entered": "Pet entered",
+                            "pet_exited": "Pet exited",
+                            "cloud_mode_change_locked": "Locked remotely",
+                            "cloud_mode_change_unlocked": "Unlocked remotely",
+                            "cloud_mode_change_smart": "Smart mode enabled remotely",
+                            "user_mode_change_locked": "Locked manually",
+                            "user_mode_change_unlocked": "Unlocked manually",
+                            "user_mode_change_smart": "Smart mode enabled manually"
+                        }
+                    }
+                }
+            }
+    },
+    "sensor": {
+      "battery_level": {
+        "name": "Battery Level"
+      },
+      "battery_voltage": {
+        "name": "Battery Voltage"
+      },
+      "signal_strength": {
+        "name": "Signal Strength"
+      },
+      "schedule_rule_count": {
+        "name": "Schedule Rule Count"
+      },
+      "active_schedule_rule_count": {
+        "name": "Active Schedule Rule Count"
+      },
+            "scheduled_pet_count": {
+                "name": "Scheduled Pet Count"
+            },
+            "last_seen": {
+                "name": "Last Seen"
+            },
+            "last_activity": {
+                "name": "Last Activity",
+                "state": {
+                    "unknown": "Unknown",
+                    "entered": "Entered",
+                    "exited": "Exited",
+                    "activity": "Activity detected"
+                }
+            },
+            "smart_access": {
+                "name": "Smart Access",
+                "state": {
+                    "unknown": "Unknown",
+                    "no_access": "No access",
+                    "out_only": "Out only",
+                    "in_only": "In only",
+                    "full_access": "Full access"
+                }
+            },
+            "next_smart_access": {
+                "name": "Next Smart Access",
+                "state": {
+                    "unknown": "Unknown",
+                    "no_access": "No access",
+                    "out_only": "Out only",
+                    "in_only": "In only",
+                    "full_access": "Full access"
+                }
+            },
+            "next_smart_access_change": {
+                "name": "Next Smart Access Change"
+            }
+        },
+        "select": {
+            "operating_mode": {
+                "name": "Locked Mode",
+                "state": {
+                    "locked": "Locked",
+                    "smart": "Smart"
+                }
+            },
+            "smart_override": {
+                "name": "Smart Override",
+                "state": {
+                    "smart_schedule": "Smart Schedule",
+                    "no_access": "No access",
+                    "out_only": "Out only",
+                    "in_only": "In only",
+                    "full_access": "Full access"
+                }
+            },
+            "final_act": {
+                "name": "Power Loss Action",
+                "state": {
+                    "locked": "Locked",
+                    "unlocked": "Unlocked"
                 }
             }
         }

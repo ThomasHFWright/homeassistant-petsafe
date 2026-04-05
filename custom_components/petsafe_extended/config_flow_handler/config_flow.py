@@ -1,241 +1,249 @@
-"""
-Config flow for petsafe_extended.
-
-This module implements the main configuration flow including:
-- Initial user setup
-- Reconfiguration of existing entries
-- Reauthentication flow
-
-For more information:
-https://developers.home-assistant.io/docs/config_entries_config_flow_handler
-"""
+"""Config flow for PetSafe Extended."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+import logging
+from typing import Any
 
-from slugify import slugify
+from botocore.exceptions import ParamValidationError
+import voluptuous as vol
 
-from custom_components.petsafe_extended.config_flow_handler.schemas import (
-    get_reauth_schema,
-    get_reconfigure_schema,
-    get_user_schema,
+from custom_components.petsafe_extended.api import async_create_auth_client, async_import_petsafe
+from custom_components.petsafe_extended.const import (
+    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+    CONF_REFRESH_TOKEN,
+    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+    DOMAIN,
 )
-from custom_components.petsafe_extended.config_flow_handler.validators import validate_credentials
-from custom_components.petsafe_extended.const import DOMAIN, LOGGER
+from custom_components.petsafe_extended.utils.auth import build_account_unique_id
 from homeassistant import config_entries
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_BASE, CONF_CODE, CONF_EMAIL, CONF_TOKEN
+import homeassistant.helpers.config_validation as cv
+from homeassistant.requirements import RequirementsNotFound
 
-if TYPE_CHECKING:
-    from custom_components.petsafe_extended.config_flow_handler.options_flow import PetSafeExtendedOptionsFlow
+_LOGGER = logging.getLogger(__name__)
 
-# Map exception types to error keys for user-facing messages
-ERROR_MAP = {
-    "PetSafeExtendedApiClientAuthenticationError": "auth",
-    "PetSafeExtendedApiClientCommunicationError": "connection",
-}
+STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_EMAIL): str})
+STEP_CODE_DATA_SCHEMA = vol.Schema({vol.Required(CONF_CODE): str})
 
 
-class PetSafeExtendedConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    """
-    Handle a config flow for petsafe_extended.
+def _build_options_schema(config_entry: ConfigEntry) -> vol.Schema:
+    """Return the options schema for PetSafe Extended."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_ENABLE_SMARTDOOR_SCHEDULES,
+                default=config_entry.options.get(
+                    CONF_ENABLE_SMARTDOOR_SCHEDULES,
+                    DEFAULT_ENABLE_SMARTDOOR_SCHEDULES,
+                ),
+            ): bool,
+        }
+    )
 
-    This class manages the configuration flow for the integration, including
-    initial setup, reconfiguration, and reauthentication.
 
-    Supported flows:
-    - user: Initial setup via UI
-    - reconfigure: Update existing configuration
-    - reauth: Handle expired credentials
-
-    For more details:
-    https://developers.home-assistant.io/docs/config_entries_config_flow_handler
-    """
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for PetSafe Extended."""
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the config flow state."""
+        self.data: dict[str, Any] = {}
+        self._petsafe: Any | None = None
+        self._client: Any | None = None
+        self._id_token: str | None = None
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._feeders: dict[str, str] | None = None
+        self._litterboxes: dict[str, str] | None = None
+        self._smartdoors: dict[str, str] | None = None
+
     @staticmethod
-    def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
-    ) -> PetSafeExtendedOptionsFlow:
-        """
-        Get the options flow for this handler.
+    def async_get_options_flow(config_entry: ConfigEntry) -> PetSafeExtendedOptionsFlow:
+        """Return the PetSafe Extended options flow."""
+        return PetSafeExtendedOptionsFlow(config_entry)
 
-        Returns:
-            The options flow instance for modifying integration options.
+    async def _async_get_petsafe(self) -> Any:
+        """Ensure the petsafe dependency is installed before importing it."""
+        if self._petsafe is None:
+            self._petsafe = await async_import_petsafe(self.hass)
+        return self._petsafe
 
-        """
-        from custom_components.petsafe_extended.config_flow_handler.options_flow import (  # noqa: PLC0415
-            PetSafeExtendedOptionsFlow,
-        )
+    async def _async_exchange_code(self, code: str, *, step_id: str) -> str | None:
+        """Exchange a confirmation code for tokens and device metadata."""
+        try:
+            petsafe = await self._async_get_petsafe()
+        except ModuleNotFoundError, RequirementsNotFound:
+            _LOGGER.exception("Unable to load the petsafe dependency during the %s step", step_id)
+            return "cannot_connect"
 
-        return PetSafeExtendedOptionsFlow()
+        try:
+            await self._async_load_devices(code)
+        except ParamValidationError:
+            return "invalid_code"
+        except petsafe.client.InvalidCodeException:
+            return "invalid_code"
+        except Exception:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+            return "unknown_error"
 
-    async def async_step_user(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """
-        Handle a flow initialized by the user.
+        return None
 
-        This is the entry point when a user adds the integration from the UI.
-
-        Args:
-            user_input: The user input from the config flow form, or None for initial display.
-
-        Returns:
-            The config flow result, either showing a form or creating an entry.
-
-        """
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            try:
-                await validate_credentials(
-                    self.hass,
-                    username=user_input[CONF_USERNAME],
-                    password=user_input[CONF_PASSWORD],
-                )
-            except Exception as exception:  # noqa: BLE001
-                errors["base"] = self._map_exception_to_error(exception)
-            else:
-                # Set unique ID based on username
-                # NOTE: This is just an example - use a proper unique ID in production
-                # See: https://developers.home-assistant.io/docs/config_entries_config_flow_handler#unique-ids
-                await self.async_set_unique_id(slugify(user_input[CONF_USERNAME]))
-                self._abort_if_unique_id_configured()
-
-                return self.async_create_entry(
-                    title=user_input[CONF_USERNAME],
-                    data=user_input,
-                )
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=get_user_schema(user_input),
-            errors=errors,
-            description_placeholders={
-                "documentation_url": "https://github.com/ThomasHFWright/homeassistant-petsafe",
-            },
-        )
-
-    async def async_step_reconfigure(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """
-        Handle reconfiguration of the integration.
-
-        Allows users to update their credentials without removing and re-adding
-        the integration.
-
-        Args:
-            user_input: The user input from the reconfigure form, or None for initial display.
-
-        Returns:
-            The config flow result, either showing a form or updating the entry.
-
-        """
-        entry = self._get_reconfigure_entry()
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            try:
-                await validate_credentials(
-                    self.hass,
-                    username=user_input[CONF_USERNAME],
-                    password=user_input[CONF_PASSWORD],
-                )
-            except Exception as exception:  # noqa: BLE001
-                errors["base"] = self._map_exception_to_error(exception)
-            else:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data=user_input,
-                )
-
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=get_reconfigure_schema(entry.data.get(CONF_USERNAME, "")),
-            errors=errors,
-        )
-
-    async def async_step_reauth(
-        self,
-        entry_data: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """
-        Handle reauthentication when credentials are invalid.
-
-        This flow is automatically triggered when the coordinator catches
-        an authentication error (ConfigEntryAuthFailed).
-
-        Args:
-            entry_data: The existing entry data (unused, per convention).
-
-        Returns:
-            The result of the reauth_confirm step.
-
-        """
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Handle reauthentication for an existing PetSafe entry."""
+        del entry_data
+        self.data = dict(self._get_reauth_entry().data)
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """
-        Handle reauthentication confirmation.
-
-        Shows the reauthentication form and processes updated credentials.
-
-        Args:
-            user_input: The user input with updated credentials, or None for initial display.
-
-        Returns:
-            The config flow result, either showing a form or updating the entry.
-
-        """
-        entry = self._get_reauth_entry()
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the confirmation code step during reauthentication."""
         errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+        email = reauth_entry.data[CONF_EMAIL]
 
-        if user_input is not None:
+        if user_input is None:
             try:
-                await validate_credentials(
-                    self.hass,
-                    username=user_input[CONF_USERNAME],
-                    password=user_input[CONF_PASSWORD],
-                )
-            except Exception as exception:  # noqa: BLE001
-                errors["base"] = self._map_exception_to_error(exception)
-            else:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data={**entry.data, **user_input},
-                )
+                petsafe = await self._async_get_petsafe()
+                await self._async_request_email_code(petsafe, email)
+            except ModuleNotFoundError, RequirementsNotFound:
+                _LOGGER.exception("Unable to load the petsafe dependency during the reauth step")
+                errors[CONF_BASE] = "cannot_connect"
+            except Exception:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+                errors[CONF_BASE] = "cannot_connect"
 
-        return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=get_reauth_schema(entry.data.get(CONF_USERNAME, "")),
-            errors=errors,
-            description_placeholders={
-                "username": entry.data.get(CONF_USERNAME, ""),
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                data_schema=STEP_CODE_DATA_SCHEMA,
+                errors=errors,
+                description_placeholders={CONF_EMAIL: email},
+            )
+
+        if error := await self._async_exchange_code(user_input[CONF_CODE], step_id="reauth_confirm"):
+            errors[CONF_CODE if error == "invalid_code" else CONF_BASE] = error
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                data_schema=STEP_CODE_DATA_SCHEMA,
+                errors=errors,
+                description_placeholders={CONF_EMAIL: email},
+            )
+
+        return self.async_update_reload_and_abort(
+            reauth_entry,
+            title=email,
+            unique_id=build_account_unique_id(email, self._id_token),
+            data_updates={
+                CONF_TOKEN: self._id_token,
+                CONF_ACCESS_TOKEN: self._access_token,
+                CONF_REFRESH_TOKEN: self._refresh_token,
             },
         )
 
-    def _map_exception_to_error(self, exception: Exception) -> str:
-        """
-        Map API exceptions to user-facing error keys.
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the email entry step."""
+        errors: dict[str, str] = {}
 
-        Args:
-            exception: The exception that was raised.
+        if user_input is None:
+            return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
 
-        Returns:
-            The error key for display in the config flow form.
+        try:
+            petsafe = await self._async_get_petsafe()
+        except ModuleNotFoundError, RequirementsNotFound:
+            _LOGGER.exception("Unable to load the petsafe dependency during the user step")
+            errors[CONF_BASE] = "cannot_connect"
+            return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
-        """
-        LOGGER.warning("Error in config flow: %s", exception)
-        exception_name = type(exception).__name__
-        return ERROR_MAP.get(exception_name, "unknown")
+        try:
+            await self._async_request_email_code(petsafe, user_input[CONF_EMAIL])
+            self.data = {CONF_EMAIL: user_input[CONF_EMAIL]}
+            return await self.async_step_code()
+        except petsafe.client.InvalidUserException:
+            errors[CONF_EMAIL] = "invalid_user"
+        except Exception:  # noqa: BLE001 - petsafe-api raises broad runtime exceptions here.
+            errors[CONF_BASE] = "cannot_connect"
+
+        return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+
+    async def async_step_code(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the confirmation code step."""
+        errors: dict[str, str] = {}
+
+        if user_input is None:
+            return self.async_show_form(step_id="code", data_schema=STEP_CODE_DATA_SCHEMA)
+
+        if error := await self._async_exchange_code(user_input[CONF_CODE], step_id="code"):
+            errors[CONF_CODE if error == "invalid_code" else CONF_BASE] = error
+            return self.async_show_form(step_id="code", data_schema=STEP_CODE_DATA_SCHEMA, errors=errors)
+
+        await self.async_set_unique_id(build_account_unique_id(self.data[CONF_EMAIL], self._id_token))
+        self._abort_if_unique_id_configured()
+        return await self.async_step_devices()
+
+    async def async_step_devices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle device selection after authentication succeeds."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="devices",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("feeders", default=list(self._feeders or {})): cv.multi_select(
+                            self._feeders or {},
+                        ),
+                        vol.Required("litterboxes", default=list(self._litterboxes or {})): cv.multi_select(
+                            self._litterboxes or {},
+                        ),
+                        vol.Required("smartdoors", default=list(self._smartdoors or {})): cv.multi_select(
+                            self._smartdoors or {},
+                        ),
+                    }
+                ),
+            )
+
+        self.data.update(user_input)
+        self.data[CONF_TOKEN] = self._id_token
+        self.data[CONF_ACCESS_TOKEN] = self._access_token
+        self.data[CONF_REFRESH_TOKEN] = self._refresh_token
+        return self.async_create_entry(title=self.data[CONF_EMAIL], data=self.data)
+
+    async def _async_request_email_code(self, petsafe: Any, email: str) -> None:
+        """Request a one-time email code from the PetSafe API."""
+        self._client = await async_create_auth_client(self.hass, petsafe, email)
+        if self._client is None:
+            raise RuntimeError("PetSafe client was not initialized")
+        await self._client.request_code()
+
+    async def _async_load_devices(self, code: str) -> None:
+        """Exchange the code for tokens and load the user's devices."""
+        if self._client is None:
+            raise RuntimeError("PetSafe client was not initialized")
+
+        await self._client.request_tokens_from_code(code)
+        self._id_token = self._client.id_token
+        self._access_token = self._client.access_token
+        self._refresh_token = self._client.refresh_token
+
+        self._feeders = {device.api_name: device.friendly_name for device in await self._client.get_feeders()}
+        self._litterboxes = {device.api_name: device.friendly_name for device in await self._client.get_litterboxes()}
+        self._smartdoors = {device.api_name: device.friendly_name for device in await self._client.get_smartdoors()}
 
 
-__all__ = ["PetSafeExtendedConfigFlowHandler"]
+class PetSafeExtendedOptionsFlow(config_entries.OptionsFlow):
+    """Options flow for PetSafe Extended."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize the options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage PetSafe Extended options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_build_options_schema(self._config_entry),
+        )
+
+
+__all__ = ["ConfigFlow", "PetSafeExtendedOptionsFlow"]

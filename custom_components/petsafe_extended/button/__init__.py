@@ -2,59 +2,59 @@
 
 from __future__ import annotations
 
-from custom_components.petsafe_extended import ButtonEntities, PetSafeCoordinator
-from custom_components.petsafe_extended.const import DOMAIN
-from custom_components.petsafe_extended.helpers import filter_selected_devices
-from homeassistant.config_entries import ConfigEntry
+from custom_components.petsafe_extended.const import CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES
+from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
+from custom_components.petsafe_extended.utils import filter_selected_devices
+from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .feeder_feed import FEEDER_BUTTON_DESCRIPTIONS, PetSafeExtendedFeederButton
+from .feeder_refresh import FEEDER_REFRESH_BUTTON_DESCRIPTIONS, PetSafeExtendedFeederRefreshButton
+from .litterbox_action import LITTERBOX_BUTTON_DESCRIPTIONS, PetSafeExtendedLitterboxButton
+from .smartdoor_refresh import SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS, PetSafeExtendedSmartDoorRefreshButton
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the button platform."""
-    coordinator: PetSafeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data.coordinator
+    schedules_enabled = entry.options.get(CONF_ENABLE_SMARTDOOR_SCHEDULES, DEFAULT_ENABLE_SMARTDOOR_SCHEDULES)
 
     try:
         feeders = filter_selected_devices(await coordinator.get_feeders(), entry.data.get("feeders"))
         litterboxes = filter_selected_devices(await coordinator.get_litterboxes(), entry.data.get("litterboxes"))
-    except Exception as exc:
-        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from exc
+        smartdoors = filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
+    except ConfigEntryAuthFailed:
+        raise
+    except Exception as err:
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe devices") from err
 
-    entities = [
-        ButtonEntities.PetSafeFeederButtonEntity(
-            hass=hass,
-            name="Feed",
-            device_type="feed",
-            device=feeder,
-            coordinator=coordinator,
-        )
+    entities: list[ButtonEntity] = [
+        PetSafeExtendedFeederButton(coordinator, feeder, description)
         for feeder in feeders
+        for description in FEEDER_BUTTON_DESCRIPTIONS
     ]
-
-    for litterbox in litterboxes:
-        entities.append(
-            ButtonEntities.PetSafeLitterboxButtonEntity(
-                hass=hass,
-                name="Clean",
-                device_type="clean",
-                device=litterbox,
-                coordinator=coordinator,
-            )
-        )
-        entities.append(
-            ButtonEntities.PetSafeLitterboxButtonEntity(
-                hass=hass,
-                name="Reset",
-                device_type="reset",
-                device=litterbox,
-                coordinator=coordinator,
-            )
-        )
+    entities.extend(
+        PetSafeExtendedFeederRefreshButton(coordinator, feeder, description)
+        for feeder in feeders
+        for description in FEEDER_REFRESH_BUTTON_DESCRIPTIONS
+    )
+    entities.extend(
+        PetSafeExtendedLitterboxButton(coordinator, litterbox, description)
+        for litterbox in litterboxes
+        for description in LITTERBOX_BUTTON_DESCRIPTIONS
+    )
+    entities.extend(
+        PetSafeExtendedSmartDoorRefreshButton(coordinator, smartdoor, description)
+        for smartdoor in smartdoors
+        for description in SMARTDOOR_REFRESH_BUTTON_DESCRIPTIONS
+        if schedules_enabled or description.key != "refresh_schedule_data"
+    )
 
     if entities:
         async_add_entities(entities)

@@ -2,24 +2,38 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from custom_components.petsafe_extended.const import DOMAIN
+from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
+from custom_components.petsafe_extended.utils import filter_selected_devices
+from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from custom_components.petsafe_extended.const import PARALLEL_UPDATES as PARALLEL_UPDATES
-from homeassistant.components.binary_sensor import BinarySensorEntityDescription
+from .smartdoor import SMARTDOOR_BINARY_SENSOR_DESCRIPTIONS, PetSafeExtendedSmartDoorBinarySensor
 
-from .connectivity import ENTITY_DESCRIPTIONS as CONNECTIVITY_DESCRIPTIONS, PetSafeExtendedConnectivitySensor
-from .filter import ENTITY_DESCRIPTIONS as FILTER_DESCRIPTIONS, PetSafeExtendedFilterSensor
 
-if TYPE_CHECKING:
-    from custom_components.petsafe_extended.data import PetSafeExtendedConfigEntry
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+def _async_update_binary_sensor_entity_categories(
+    hass: HomeAssistant,
+    entities: list[BinarySensorEntity],
+) -> None:
+    """Apply updated binary sensor categories to existing registry entries."""
+    entity_registry = er.async_get(hass)
 
-# Combine all entity descriptions from different modules
-ENTITY_DESCRIPTIONS: tuple[BinarySensorEntityDescription, ...] = (
-    *CONNECTIVITY_DESCRIPTIONS,
-    *FILTER_DESCRIPTIONS,
-)
+    for entity in entities:
+        if entity.entity_category is None or entity.unique_id is None:
+            continue
+
+        entity_id = entity_registry.async_get_entity_id("binary_sensor", DOMAIN, entity.unique_id)
+        if entity_id is None:
+            continue
+
+        existing_entry = entity_registry.async_get(entity_id)
+        if existing_entry is None or existing_entry.entity_category == entity.entity_category:
+            continue
+
+        entity_registry.async_update_entity(entity_id, entity_category=entity.entity_category)
 
 
 async def async_setup_entry(
@@ -27,24 +41,21 @@ async def async_setup_entry(
     entry: PetSafeExtendedConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the binary_sensor platform."""
-    # Create connectivity sensors
-    connectivity_entities = [
-        PetSafeExtendedConnectivitySensor(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
-        )
-        for entity_description in CONNECTIVITY_DESCRIPTIONS
-    ]
+    """Set up the binary sensor platform."""
+    coordinator = entry.runtime_data.coordinator
 
-    # Create filter sensors
-    filter_entities = [
-        PetSafeExtendedFilterSensor(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
-        )
-        for entity_description in FILTER_DESCRIPTIONS
-    ]
+    try:
+        smartdoors = filter_selected_devices(await coordinator.get_smartdoors(), entry.data.get("smartdoors"))
+    except ConfigEntryAuthFailed:
+        raise
+    except Exception as err:
+        raise ConfigEntryNotReady("Failed to retrieve PetSafe SmartDoor devices") from err
 
-    # Add all entities
-    async_add_entities([*connectivity_entities, *filter_entities])
+    entities: list[BinarySensorEntity] = [
+        PetSafeExtendedSmartDoorBinarySensor(coordinator, smartdoor, description)
+        for smartdoor in smartdoors
+        for description in SMARTDOOR_BINARY_SENSOR_DESCRIPTIONS
+    ]
+    if entities:
+        _async_update_binary_sensor_entity_categories(hass, entities)
+        async_add_entities(entities)

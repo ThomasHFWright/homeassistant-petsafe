@@ -2,29 +2,50 @@
 
 from __future__ import annotations
 
-# pylint: disable=wrong-import-position,import-error,too-few-public-methods
-
-import sys
-import types
 from pathlib import Path
 
+# pylint: disable=wrong-import-position,import-error,too-few-public-methods
+import sys
+import types
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_EMAIL, CONF_TOKEN
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_EMAIL, CONF_TOKEN
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 if "petsafe" not in sys.modules:
-    petsafe_module = types.ModuleType("petsafe")
-    petsafe_const = types.ModuleType("petsafe.const")
-    petsafe_const.SMARTDOOR_MODE_MANUAL_LOCKED = "manual_locked"
-    petsafe_const.SMARTDOOR_MODE_MANUAL_UNLOCKED = "manual_unlocked"
-    petsafe_const.SMARTDOOR_MODE_SMART = "smart"
-    petsafe_module.const = petsafe_const
-    petsafe_module.devices = types.SimpleNamespace(
-        DeviceSmartDoor=object,
-        DeviceSmartFeed=object,
-        DeviceScoopfree=object,
+    petsafe_module: Any = types.ModuleType("petsafe")
+    petsafe_const: Any = types.ModuleType("petsafe.const")
+    petsafe_client: Any = types.ModuleType("petsafe.client")
+    petsafe_pets: Any = types.ModuleType("petsafe.pets")
+
+    class _InvalidUserException(Exception):
+        """Stub invalid-user exception."""
+
+    class _InvalidCodeException(Exception):
+        """Stub invalid-code exception."""
+
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_LOCKED", "MANUAL_LOCKED")
+    setattr(petsafe_const, "SMARTDOOR_MODE_MANUAL_UNLOCKED", "MANUAL_UNLOCKED")
+    setattr(petsafe_const, "SMARTDOOR_MODE_SMART", "SMART")
+    setattr(petsafe_const, "SMARTDOOR_FINAL_ACT_LOCKED", "LOCKED")
+    setattr(petsafe_const, "SMARTDOOR_FINAL_ACT_UNLOCKED", "UNLOCKED")
+    setattr(petsafe_module, "const", petsafe_const)
+    setattr(petsafe_client, "InvalidUserException", _InvalidUserException)
+    setattr(petsafe_client, "InvalidCodeException", _InvalidCodeException)
+    setattr(petsafe_module, "client", petsafe_client)
+    setattr(
+        petsafe_module,
+        "devices",
+        types.SimpleNamespace(
+            DeviceSmartDoor=object,
+            DeviceSmartFeed=object,
+            DeviceScoopfree=object,
+        ),
     )
 
     class _StubPetSafeClient:  # pragma: no cover - import stub
@@ -33,11 +54,25 @@ if "petsafe" not in sys.modules:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-    petsafe_module.PetSafeClient = _StubPetSafeClient
-    sys.modules["petsafe"] = petsafe_module
-    sys.modules["petsafe.const"] = petsafe_const
+    async def _list_pets(*args, **kwargs) -> list[Any]:
+        """Stub pet listing helper."""
+        return []
 
-from custom_components.petsafe.const import CONF_REFRESH_TOKEN, DOMAIN  # noqa: E402
+    async def _list_pet_products(*args, **kwargs) -> list[Any]:
+        """Stub pet-product listing helper."""
+        return []
+
+    setattr(petsafe_module, "PetSafeClient", _StubPetSafeClient)
+    setattr(petsafe_pets, "list_pets", _list_pets)
+    setattr(petsafe_pets, "list_pet_products", _list_pet_products)
+    setattr(petsafe_module, "pets", petsafe_pets)
+    sys.modules["petsafe"] = petsafe_module
+    sys.modules["petsafe.client"] = petsafe_client
+    sys.modules["petsafe.const"] = petsafe_const
+    sys.modules["petsafe.pets"] = petsafe_pets
+
+from custom_components.petsafe_extended.const import CONF_REFRESH_TOKEN, DOMAIN
+from custom_components.petsafe_extended.data import PetSafeExtendedRuntimeData
 
 
 @pytest.fixture
@@ -54,3 +89,27 @@ def mock_config_entry() -> MockConfigEntry:
         },
         unique_id="test_entry",
     )
+
+
+@pytest.fixture
+def attach_runtime_data():
+    """Attach runtime data to a config entry for platform tests."""
+
+    def _attach(entry: MockConfigEntry, coordinator: Any, client: Any | None = None) -> MockConfigEntry:
+        entry.runtime_data = PetSafeExtendedRuntimeData(
+            client=client or SimpleNamespace(),
+            coordinator=coordinator,
+            integration=cast(
+                Any,
+                SimpleNamespace(
+                    name="PetSafe Extended",
+                    version="0.1.0",
+                    domain=DOMAIN,
+                    documentation="https://example.com/docs",
+                    issue_tracker="https://example.com/issues",
+                ),
+            ),
+        )
+        return entry
+
+    return _attach
