@@ -75,6 +75,8 @@ Recommended migration path:
 For feeder and litter box users, device-side settings and cloud-stored schedules remain in your PetSafe account, but
 Home Assistant will create new devices and new entities for them under this integration.
 
+If you prefer, you should be able to run both integrations at the same time and not import your feeders and litter boxes with this integration. This should work, though I've not tested this scenario.
+
 ## Supported Devices
 
 ### SmartFeed feeders
