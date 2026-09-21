@@ -149,7 +149,9 @@ uv pip install --requirement "/tmp/requirements_all.txt"
 log_header "Installing Home Assistant ${HA_VERSION} test dependencies"
 curl -fsSL "${HA_CORE_BASE_URL}/requirements_test_pre_commit.txt" -o "/tmp/requirements_test_pre_commit.txt"  # required by requirements_test.txt
 curl -fsSL "${HA_CORE_BASE_URL}/requirements_test.txt" -o "/tmp/requirements_test.txt"
-uv pip install --requirement "/tmp/requirements_test.txt"
+# This project uses Pyright, so omit Home Assistant's expiring mypy nightly.
+grep -v '^mypy-dev==' /tmp/requirements_test.txt > /tmp/requirements_test_petsafe.txt
+uv pip install --requirement "/tmp/requirements_test_petsafe.txt"
 
 log_header "Installing Home Assistant ${HA_VERSION} core"
 uv pip install "homeassistant==${HA_VERSION}"
