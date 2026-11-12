@@ -12,5 +12,5 @@
   "requirements": [
     "petsafe-api==3.0.4"
   ],
-  "version": "2.0.2"
+  "version": "2.0.3"
 }
