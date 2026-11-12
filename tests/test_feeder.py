@@ -13,7 +13,7 @@ from custom_components.petsafe_extended.button.feeder_feed import (
     FEEDER_BUTTON_DESCRIPTIONS,
     PetSafeExtendedFeederButton,
 )
-from custom_components.petsafe_extended.const import DOMAIN, FEEDER_MODEL_GEN2, SERVICE_FEED
+from custom_components.petsafe_extended.const import DOMAIN, FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2, SERVICE_FEED
 from custom_components.petsafe_extended.coordinator import PetSafeExtendedDataUpdateCoordinator
 from custom_components.petsafe_extended.data import PetSafeExtendedCoordinatorData, PetSafeExtendedFeederDetails
 from custom_components.petsafe_extended.sensor.feeder import FEEDER_SENSOR_DESCRIPTIONS, PetSafeExtendedFeederSensor
@@ -22,6 +22,7 @@ from custom_components.petsafe_extended.switch.feeder_control import (
     FEEDER_SWITCH_DESCRIPTIONS,
     PetSafeExtendedFeederSwitch,
 )
+from custom_components.petsafe_extended.utils.device_selection import is_device_feeder
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.helpers import device_registry as dr
 
@@ -132,3 +133,26 @@ async def test_feed_service_routes_targets_to_coordinator(
 
     coordinator.async_feed_feeder.assert_awaited_once_with(feeder.api_name, 2, None, refresh=False)
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.parametrize("model", [FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2, "Other"])
+@pytest.mark.parametrize("ownership", ["modern", "legacy", "composite"])
+@pytest.mark.parametrize("matches", [True, False])
+@pytest.mark.parametrize("loaded", [True, False])
+def test_feeder_device_ownership(model, ownership, matches, loaded) -> None:
+    """Match both registry APIs without reading deprecated modern properties."""
+    entry = SimpleNamespace(entry_id="feeder-entry", runtime_data=object() if loaded else None)
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [SimpleNamespace(entry_id="other-entry"), entry]
+    owner = entry.entry_id if matches else "unrelated-entry"
+    device = SimpleNamespace(model=model)
+    if ownership == "modern":
+        # No config_entries attribute: accessing the removed API must fail.
+        device.config_entry_id = owner
+    else:
+        device.config_entries = {owner}
+        if ownership == "composite":
+            device.config_entry_id = None
+
+    assert is_device_feeder(hass, device) is (model != "Other" and matches and loaded)
+    assert is_device_feeder(hass, None) is False

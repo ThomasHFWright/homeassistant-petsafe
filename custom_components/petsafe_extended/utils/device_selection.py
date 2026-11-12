@@ -119,8 +119,10 @@ def is_device_feeder(hass: HomeAssistant, device: DeviceEntry | None) -> bool:
     if device is None or device.model not in {FEEDER_MODEL_GEN1, FEEDER_MODEL_GEN2}:
         return False
 
+    entry_id = getattr(device, "config_entry_id", None)
+    entry_ids = {entry_id} if entry_id is not None else device.config_entries
     for config_entry in hass.config_entries.async_entries(DOMAIN):
-        if config_entry.entry_id not in device.config_entries:
+        if config_entry.entry_id not in entry_ids:
             continue
         if getattr(config_entry, "runtime_data", None) is None:
             return False
